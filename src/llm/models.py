@@ -45,6 +45,16 @@ class LLMModel(BaseModel):
 # Define available models
 AVAILABLE_MODELS = [
     LLMModel(
+        display_name="[deepseek] deepseek-r1",
+        model_name="deepseek-reasoner",
+        provider=ModelProvider.DEEPSEEK
+    ),
+    LLMModel(
+        display_name="[deepseek] deepseek-v3",
+        model_name="deepseek-chat",
+        provider=ModelProvider.DEEPSEEK
+    ),
+    LLMModel(
         display_name="[anthropic] claude-3.5-haiku",
         model_name="claude-3-5-haiku-latest",
         provider=ModelProvider.ANTHROPIC
@@ -58,16 +68,6 @@ AVAILABLE_MODELS = [
         display_name="[anthropic] claude-3.7-sonnet",
         model_name="claude-3-7-sonnet-latest",
         provider=ModelProvider.ANTHROPIC
-    ),
-    LLMModel(
-        display_name="[deepseek] deepseek-r1",
-        model_name="deepseek-reasoner",
-        provider=ModelProvider.DEEPSEEK
-    ),
-    LLMModel(
-        display_name="[deepseek] deepseek-v3",
-        model_name="deepseek-chat",
-        provider=ModelProvider.DEEPSEEK
     ),
     LLMModel(
         display_name="[gemini] gemini-2.0-flash",

@@ -96,6 +96,14 @@ def run_hedge_fund(
         return {
             "decisions": parse_hedge_fund_response(final_state["messages"][-1].content),
             "analyst_signals": final_state["data"]["analyst_signals"],
+            "analysis_data": {
+                ticker: {
+                    "fundamentals": final_state["data"].get("fundamentals", {}).get(ticker),
+                    "valuation": final_state["data"].get("valuation", {}).get(ticker),
+                    "metrics": final_state["data"].get("metrics", {}).get(ticker),
+                }
+                for ticker in tickers
+            }
         }
     finally:
         # Stop progress tracking
