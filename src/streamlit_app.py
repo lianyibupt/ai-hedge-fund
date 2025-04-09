@@ -15,7 +15,7 @@ with st.sidebar:
     # 股票代码输入
     tickers = st.text_input(
         "股票代码(逗号分隔)", 
-        value="NBIS,SMCI,RXRX,CLSK",
+        value="NBIS,SMCI,RXRX,CLSK,NVDA",
         help="输入要分析的股票代码，多个代码用逗号分隔"
     )
     
@@ -133,54 +133,24 @@ if st.button("运行对冲基金", type="primary"):
             # 显示结果
             st.success("分析完成!")
             
+            # 交易决策表格
             st.subheader("交易决策")
-            st.json(result["decisions"])
+            decisions_md = "| 股票代码 | 操作 | 数量 | 价格 | 理由 |\n|---------|------|------|------|------|\n"
+            for ticker, decision in result["decisions"].items():
+                price = decision.get('price', 'N/A')
+                price_str = f"${price:.2f}" if isinstance(price, (int, float)) else str(price)
+                decisions_md += f"| {ticker} | {decision['action']} | {decision.get('quantity', 'N/A')} | {price_str} | {decision['reason']} |\n"
+            st.markdown(decisions_md)
             
+            # 分析师信号表格
             st.subheader("分析师信号")
-            st.json(result["analyst_signals"])
-            
-            # 显示详细财务数据和分析依据
-            st.subheader("详细财务分析")
-            for ticker in result["analysis_data"]:
-                with st.expander(f"📊 {ticker} 详细分析", expanded=False):
-                    tab1, tab2, tab3 = st.tabs(["财务指标", "估值分析", "分析师依据"])
-                    
-                    with tab1:
-                        if result["analysis_data"][ticker]["fundamentals"]:
-                            st.write("#### 基础财务指标")
-                            fundamentals = result["analysis_data"][ticker]["fundamentals"]
-                            col1, col2, col3 = st.columns(3)
-                            with col1:
-                                st.metric("ROE", f"{fundamentals.get('return_on_equity', 0)*100:.1f}%")
-                            with col2:
-                                st.metric("资产负债率", f"{fundamentals.get('debt_to_equity', 0)*100:.1f}%")
-                            with col3:
-                                st.metric("营业利润率", f"{fundamentals.get('operating_margin', 0)*100:.1f}%")
-                            
-                            st.write("#### 历史财务数据")
-                            st.dataframe(fundamentals.get("historical_data", []))
-                    
-                    with tab2:
-                        if result["analysis_data"][ticker]["valuation"]:
-                            valuation = result["analysis_data"][ticker]["valuation"]
-                            st.write("#### 估值指标")
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("内在价值", f"${valuation.get('intrinsic_value', 0):,.2f}")
-                            with col2:
-                                st.metric("安全边际", f"{valuation.get('margin_of_safety', 0)*100:.1f}%")
-                            
-                            st.write("#### 估值假设")
-                            st.json(valuation.get("assumptions", {}))
-                    
-                    with tab3:
-                        if ticker in result["analyst_signals"]:
-                            for analyst, signal in result["analyst_signals"][ticker].items():
-                                with st.expander(f"{analyst.replace('_', ' ').title()} 分析"):
-                                    st.write(f"**信号**: {signal['signal']}")
-                                    st.write(f"**置信度**: {signal['confidence']}%")
-                                    st.write("**分析依据**:")
-                                    st.write(signal["reasoning"])
+            for ticker in result["analyst_signals"]:
+                signals_md = f"### {ticker}\n| 分析师 | 信号 | 置信度 | 关键依据 |\n|--------|------|--------|----------|\n"
+                for analyst, signal in result["analyst_signals"][ticker].items():
+                    confidence = signal['confidence']
+                    confidence_str = f"{confidence}%" if isinstance(confidence, (int, float)) else str(confidence)
+                    signals_md += f"| {analyst.replace('_', ' ').title()} | {signal['signal']} | {confidence_str} | {signal['reasoning'].split('.')[0]}... |\n"
+                st.markdown(signals_md)
             
         except Exception as e:
             st.error(f"运行失败: {str(e)}")

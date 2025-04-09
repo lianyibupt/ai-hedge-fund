@@ -15,59 +15,59 @@ from agents.warren_buffett import warren_buffett_agent
 
 # Define analyst configuration - single source of truth
 ANALYST_CONFIG = {
-    "ben_graham": {
-        "display_name": "Ben Graham",
-        "agent_func": ben_graham_agent,
-        "order": 0,
-    },
-    "bill_ackman": {
-        "display_name": "Bill Ackman",
-        "agent_func": bill_ackman_agent,
-        "order": 1,
-    },
-    "cathie_wood": {
-        "display_name": "Cathie Wood",
-        "agent_func": cathie_wood_agent,
-        "order": 2,
-    },
-    "charlie_munger": {
-        "display_name": "Charlie Munger",
-        "agent_func": charlie_munger_agent,
-        "order": 3,
-    },
-    "peter_lynch": {
-        "display_name": "Peter Lynch",
-        "agent_func": peter_lynch_agent,
-        "order": 4,
-    },
-    "phil_fisher": {
-        "display_name": "Phil Fisher",
-        "agent_func": phil_fisher_agent,
-        "order": 5,
-    },
-    "stanley_druckenmiller": {
-        "display_name": "Stanley Druckenmiller",
-        "agent_func": stanley_druckenmiller_agent,
-        "order": 6,
-    },
-    "warren_buffett": {
-        "display_name": "Warren Buffett",
-        "agent_func": warren_buffett_agent,
-        "order": 7,
-    },
     "technical_analyst": {
         "display_name": "Technical Analyst",
         "agent_func": technical_analyst_agent,
-        "order": 8,
-    },
-    "fundamentals_analyst": {
-        "display_name": "Fundamentals Analyst",
-        "agent_func": fundamentals_agent,
-        "order": 9,
+        "order": 0,
     },
     "sentiment_analyst": {
         "display_name": "Sentiment Analyst",
         "agent_func": sentiment_agent,
+        "order": 1,
+    },
+    "ben_graham": {
+        "display_name": "Ben Graham",
+        "agent_func": ben_graham_agent,
+        "order": 2,
+    },
+    "bill_ackman": {
+        "display_name": "Bill Ackman",
+        "agent_func": bill_ackman_agent,
+        "order": 3,
+    },
+    "cathie_wood": {
+        "display_name": "Cathie Wood",
+        "agent_func": cathie_wood_agent,
+        "order": 4,
+    },
+    "charlie_munger": {
+        "display_name": "Charlie Munger",
+        "agent_func": charlie_munger_agent,
+        "order": 5,
+    },
+    "peter_lynch": {
+        "display_name": "Peter Lynch",
+        "agent_func": peter_lynch_agent,
+        "order": 6,
+    },
+    "phil_fisher": {
+        "display_name": "Phil Fisher",
+        "agent_func": phil_fisher_agent,
+        "order": 7,
+    },
+    "stanley_druckenmiller": {
+        "display_name": "Stanley Druckenmiller",
+        "agent_func": stanley_druckenmiller_agent,
+        "order": 8,
+    },
+    "warren_buffett": {
+        "display_name": "Warren Buffett",
+        "agent_func": warren_buffett_agent,
+        "order": 9,
+    },
+    "fundamentals_analyst": {
+        "display_name": "Fundamentals Analyst",
+        "agent_func": fundamentals_agent,
         "order": 10,
     },
     "valuation_analyst": {
