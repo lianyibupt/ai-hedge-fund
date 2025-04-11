@@ -57,7 +57,7 @@ class FutuAPI:
         if not self.quote_ctx:
             return None
             
-        ret, data = self.quote_ctx.get_financial_data(code, financial_type)
+        ret, data = self.quote_ctx.get_stock_quote(code)
         
         if ret != RET_OK:
             print(f"Failed to get financial data: {data}")

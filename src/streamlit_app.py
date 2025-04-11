@@ -14,8 +14,8 @@ with st.sidebar:
     
     # 股票代码输入
     tickers = st.text_input(
-        "股票代码(逗号分隔)", 
-        value="NBIS,SMCI,RXRX,CLSK,NVDA",
+        "股票代码(逗号分隔)",
+        value="HK.00700,HK.03690,HK.09988,HK.02020,HK.00941",
         help="输入要分析的股票代码，多个代码用逗号分隔"
     )
     
