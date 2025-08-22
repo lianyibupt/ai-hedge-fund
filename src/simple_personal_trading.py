@@ -13,7 +13,7 @@ from colorama import Fore, Style, init
 # 添加src目录到Python路径
 sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
 
-from tools.yfinance_api import get_prices_yfinance, prices_to_df_yfinance, get_financial_metrics_yfinance
+from tools.api import get_prices, prices_to_df, get_financial_metrics
 from utils.personal_indicators import generate_comprehensive_signal
 
 init(autoreset=True)
@@ -29,14 +29,14 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
     extended_start = (datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=90)).strftime("%Y-%m-%d")
     
     print(f"⏳ 获取价格数据 ({extended_start} 到 {end_date})...")
-    prices = get_prices_yfinance(ticker, extended_start, end_date)
+    prices = get_prices(ticker, extended_start, end_date)
     
     if not prices:
         print(f"❌ 无法获取{ticker}的价格数据")
         return None
     
     # 转换为DataFrame
-    prices_df = prices_to_df_yfinance(prices)
+    prices_df = prices_to_df(prices)
     
     if len(prices_df) < 30:
         print(f"❌ {ticker}数据不足（仅{len(prices_df)}天），需要至少30天数据")
@@ -51,7 +51,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
     
     # 获取基本财务信息
     print(f"💰 获取财务指标...")
-    financial_metrics = get_financial_metrics_yfinance(ticker, end_date)
+    financial_metrics = get_financial_metrics(ticker, end_date)
     
     pe_ratio = None
     pb_ratio = None

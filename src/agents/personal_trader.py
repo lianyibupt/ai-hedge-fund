@@ -7,7 +7,7 @@
 import json
 from langchain_core.messages import HumanMessage
 from graph.state import AgentState, show_agent_reasoning
-from tools.yfinance_api import get_prices_yfinance, prices_to_df_yfinance
+from tools.api import get_prices, prices_to_df
 from utils.progress import progress
 from utils.personal_indicators import (
     calculate_macd,
@@ -43,7 +43,7 @@ def personal_trader_agent(state: AgentState):
         # 为了计算技术指标，我们需要更长的历史数据
         extended_start = _get_extended_start_date(start_date)
         
-        prices = get_prices_yfinance(
+        prices = get_prices(
             ticker=ticker,
             start_date=extended_start,
             end_date=end_date,
@@ -54,7 +54,7 @@ def personal_trader_agent(state: AgentState):
             continue
 
         # 转换为DataFrame
-        prices_df = prices_to_df_yfinance(prices)
+        prices_df = prices_to_df(prices)
         
         if len(prices_df) < 30:
             progress.update_status("personal_trader_agent", ticker, "失败: 数据不足")

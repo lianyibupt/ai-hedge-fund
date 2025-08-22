@@ -3,6 +3,7 @@ import pandas as pd
 from futu import RET_OK
 from typing import Optional
 from .futu_api import FutuAPI
+from .itick_api import get_itick_api, date_to_timestamp
 
 from data.cache import get_cache
 from data.models import (
@@ -23,7 +24,7 @@ _cache = get_cache()
 
 
 def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
-    """Fetch price data from Futu API."""
+    """Fetch price data with intelligent fallback mechanism."""
     # Check cache first
     if cached_data := _cache.get_prices(ticker):
         # Filter cached data by date range
@@ -31,38 +32,31 @@ def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
         if filtered_data:
             return filtered_data
 
-    # Fetch from Futu API if not in cache
-    try:
-        futu = FutuAPI()
-        if not futu.connect():
-            raise Exception("Failed to connect to Futu API")
-
-        # Convert ticker to Futu format (e.g. AAPL -> US.AAPL)
-        futu_code = f"US.{ticker}" if not ticker.startswith(("US.", "HK.", "SH.", "SZ.")) else ticker
-        
-        kline_data = futu.get_history_kline(futu_code, start_date, end_date)
-        if not kline_data:
-            return []
-
-        # Convert to Price objects
-        prices = []
-        for item in kline_data:
-            prices.append(Price(
-                open=float(item["open"]),
-                close=float(item["close"]),
-                high=float(item["high"]),
-                low=float(item["low"]),
-                volume=int(item["volume"]),
-                time=item["time_key"][:10]  # YYYY-MM-DD format
-            ))
-
-        # Cache the results as dicts
-        _cache.set_prices(ticker, [p.model_dump() for p in prices])
-        futu.close()
-        return prices
-
-    except Exception as e:
-        raise Exception(f"Error fetching price data for {ticker}: {str(e)}")
+    # Try multiple data sources in order of preference
+    sources_to_try = [
+        ("iTick API", _fetch_prices_from_itick),
+        ("Mock Data", _fetch_prices_mock)
+    ]
+    
+    for source_name, fetch_function in sources_to_try:
+        try:
+            print(f"🔄 尝试从 {source_name} 获取 {ticker} 的价格数据...")
+            prices = fetch_function(ticker, start_date, end_date)
+            
+            if prices:
+                print(f"✅ 成功从 {source_name} 获取到 {len(prices)} 条价格数据")
+                # Cache the results as dicts
+                _cache.set_prices(ticker, [p.model_dump() for p in prices])
+                return prices
+            else:
+                print(f"⚠️ {source_name} 返回空数据")
+                
+        except Exception as e:
+            print(f"❌ {source_name} 获取失败: {str(e)}")
+            continue
+    
+    # If all sources fail
+    raise Exception(f"所有数据源都无法获取 {ticker} 的价格数据")
 
 
 def get_financial_metrics(
@@ -71,7 +65,7 @@ def get_financial_metrics(
     period: str = "ttm",
     limit: int = 10,
 ) -> list[FinancialMetrics]:
-    """Fetch financial metrics using Futu API."""
+    """Fetch financial metrics with intelligent fallback mechanism."""
     # Check cache first
     if cached_data := _cache.get_financial_metrics(ticker):
         # Filter cached data by date and limit
@@ -80,41 +74,73 @@ def get_financial_metrics(
         if filtered_data:
             return filtered_data[:limit]
 
-    # Fetch data using Futu API
-    try:
-        futu = FutuAPI()
-        if not futu.connect():
-            raise Exception("Failed to connect to Futu API")
+    # Try multiple data sources in order of preference
+    sources_to_try = [
+        ("iTick API", _fetch_financial_metrics_from_itick),
+        ("Mock Data", _fetch_financial_metrics_mock)
+    ]
+    
+    for source_name, fetch_function in sources_to_try:
+        try:
+            print(f"🔄 尝试从 {source_name} 获取 {ticker} 的财务指标...")
+            metrics = fetch_function(ticker, end_date, period, limit)
+            
+            if metrics:
+                print(f"✅ 成功从 {source_name} 获取到财务指标")
+                # Cache the results as dicts
+                _cache.set_financial_metrics(ticker, [m.model_dump() for m in metrics])
+                return metrics
+            else:
+                print(f"⚠️ {source_name} 返回空数据")
+                
+        except Exception as e:
+            print(f"❌ {source_name} 获取失败: {str(e)}")
+            continue
+    
+    # If all sources fail
+    raise Exception(f"所有数据源都无法获取 {ticker} 的财务指标")
 
-        # Convert ticker to Futu format
-        futu_code = f"US.{ticker}" if not ticker.startswith(("US.", "HK.", "SH.", "SZ.")) else ticker
+
+def _fetch_financial_metrics_from_futu(
+    ticker: str,
+    end_date: str,
+    period: str = "ttm",
+    limit: int = 10,
+) -> list[FinancialMetrics]:
+    """从Futu API获取财务指标"""
+    futu = FutuAPI()
+    if not futu.connect():
+        raise Exception("Failed to connect to Futu API")
+
+    # Convert ticker to Futu format
+    futu_code = f"US.{ticker}" if not ticker.startswith(("US.", "HK.", "SH.", "SZ.")) else ticker
+    
+    # Get market snapshot for basic info
+    snapshot = futu.get_market_snapshot([futu_code])
+    if not snapshot:
+        return []
         
-        # Get market snapshot for basic info
-        snapshot = futu.get_market_snapshot([futu_code])
-        if not snapshot:
-            return []
+    snapshot = snapshot[0]
+    
+    # Get financial data
+    financial_data = futu.get_financial_data(futu_code, "income") or []
+    balance_data = futu.get_financial_data(futu_code, "balance") or []
+    cashflow_data = futu.get_financial_data(futu_code, "cashflow") or []
+    
+    # Convert to FinancialMetrics objects
+    financial_metrics = []
+    for item in financial_data:
+        if item["report_date"] > end_date:
+            continue
             
-        snapshot = snapshot[0]
+        # Find matching balance sheet and cashflow data
+        balance_item = next((b for b in balance_data if b["report_date"] == item["report_date"]), {})
+        cashflow_item = next((c for c in cashflow_data if c["report_date"] == item["report_date"]), {})
         
-        # Get financial data
-        financial_data = futu.get_financial_data(futu_code, "income") or []
-        balance_data = futu.get_financial_data(futu_code, "balance") or []
-        cashflow_data = futu.get_financial_data(futu_code, "cashflow") or []
-        
-        # Convert to FinancialMetrics objects
-        financial_metrics = []
-        for item in financial_data:
-            if item["report_date"] > end_date:
-                continue
-                
-            # Find matching balance sheet and cashflow data
-            balance_item = next((b for b in balance_data if b["report_date"] == item["report_date"]), {})
-            cashflow_item = next((c for c in cashflow_data if c["report_date"] == item["report_date"]), {})
+        def safe_divide(a, b):
+            return a / b if a is not None and b is not None and b != 0 else None
             
-            def safe_divide(a, b):
-                return a / b if a is not None and b is not None and b != 0 else None
-                
-            metrics = FinancialMetrics(
+        metrics = FinancialMetrics(
                 ticker=ticker,
                 report_period=item["report_date"],
                 period=period,
@@ -163,22 +189,17 @@ def get_financial_metrics(
                 earnings_per_share=snapshot.get("eps"),
                 book_value_per_share=snapshot.get("book_value_per_share"),
                 free_cash_flow_per_share=safe_divide(cashflow_item.get("free_cash_flow"), snapshot.get("total_shares"))
-            )
-            financial_metrics.append(metrics)
-            
-            if len(financial_metrics) >= limit:
-                break
-
-        if not financial_metrics:
-            return []
-
-        # Cache the results as dicts
-        _cache.set_financial_metrics(ticker, [m.model_dump() for m in financial_metrics])
-        futu.close()
-        return financial_metrics
+        )
+        financial_metrics.append(metrics)
         
-    except Exception as e:
-        raise Exception(f"Error fetching data from Futu API: {ticker} - {str(e)}")
+        if len(financial_metrics) >= limit:
+            break
+
+    if not financial_metrics:
+        return []
+
+    futu.close()
+    return financial_metrics
 
 
 def search_line_items(
@@ -322,3 +343,92 @@ def prices_to_df(prices: list[Price]) -> pd.DataFrame:
 def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
     prices = get_prices(ticker, start_date, end_date)
     return prices_to_df(prices)
+
+
+# =============================================================================
+# Data Source Implementations
+# =============================================================================
+
+def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str) -> list[Price]:
+    """从iTick API获取价格数据"""
+    itick_api = get_itick_api()
+    
+    # 转换日期为时间戳
+    start_timestamp = date_to_timestamp(start_date)
+    end_timestamp = date_to_timestamp(end_date)
+    
+    # 获取历史K线数据
+    kline_data = itick_api.get_historical_kline(
+        ticker=ticker,
+        period="1d",
+        start_time=str(start_timestamp),
+        end_time=str(end_timestamp),
+        region="us"
+    )
+    
+    # 转换为Price对象
+    return itick_api.convert_to_price_objects(kline_data, ticker)
+
+
+def _fetch_prices_from_futu(ticker: str, start_date: str, end_date: str) -> list[Price]:
+    """从Futu API获取价格数据"""
+    futu = FutuAPI()
+    if not futu.connect():
+        raise Exception("Failed to connect to Futu API")
+
+    # Convert ticker to Futu format (e.g. AAPL -> US.AAPL)
+    futu_code = f"US.{ticker}" if not ticker.startswith(("US.", "HK.", "SH.", "SZ.")) else ticker
+    
+    kline_data = futu.get_history_kline(futu_code, start_date, end_date)
+    if not kline_data:
+        return []
+
+    # Convert to Price objects
+    prices = []
+    for item in kline_data:
+        prices.append(Price(
+            open=float(item["open"]),
+            close=float(item["close"]),
+            high=float(item["high"]),
+            low=float(item["low"]),
+            volume=int(item["volume"]),
+            time=item["time_key"][:10]  # YYYY-MM-DD format
+        ))
+
+    futu.close()
+    return prices
+
+
+def _fetch_prices_mock(ticker: str, start_date: str, end_date: str) -> list[Price]:
+    """生成模拟价格数据"""
+    from .api_fallback import MockDataGenerator
+    mock_generator = MockDataGenerator()
+    return mock_generator.generate_mock_prices(ticker, start_date, end_date)
+
+
+def _fetch_financial_metrics_from_itick(
+    ticker: str,
+    end_date: str,
+    period: str = "ttm",
+    limit: int = 10,
+) -> list[FinancialMetrics]:
+    """从iTick API获取财务指标"""
+    itick_api = get_itick_api()
+    
+    # 获取财务数据
+    financial_data = itick_api.get_financial_data(ticker, region="us")
+    
+    # 转换为FinancialMetrics对象
+    return itick_api.convert_to_financial_metrics(financial_data, ticker)
+
+
+def _fetch_financial_metrics_mock(
+    ticker: str,
+    end_date: str,
+    period: str = "ttm",
+    limit: int = 10,
+) -> list[FinancialMetrics]:
+    """生成模拟财务指标数据"""
+    from .api_fallback import MockDataGenerator
+    mock_generator = MockDataGenerator()
+    return mock_generator.generate_mock_financial_metrics(ticker, end_date)

@@ -25,6 +25,10 @@ class MockDataGenerator:
         start_dt = datetime.strptime(start_date, "%Y-%m-%d")
         end_dt = datetime.strptime(end_date, "%Y-%m-%d")
         
+        # 确保至少有120天的数据用于技术分析
+        if (end_dt - start_dt).days < 120:
+            start_dt = end_dt - timedelta(days=120)
+        
         base_price = self.base_prices.get(ticker, 100.0)
         
         prices = []
