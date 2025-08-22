@@ -8,7 +8,7 @@ import json
 import pandas as pd
 import numpy as np
 
-from tools.api import get_prices, prices_to_df
+from tools.yfinance_api import get_prices_yfinance, prices_to_df_yfinance
 from utils.progress import progress
 
 
@@ -34,7 +34,7 @@ def technical_analyst_agent(state: AgentState):
         progress.update_status("technical_analyst_agent", ticker, "Analyzing price data")
 
         # Get the historical price data
-        prices = get_prices(
+        prices = get_prices_yfinance(
             ticker=ticker,
             start_date=start_date,
             end_date=end_date,
@@ -45,7 +45,7 @@ def technical_analyst_agent(state: AgentState):
             continue
 
         # Convert prices to a DataFrame
-        prices_df = prices_to_df(prices)
+        prices_df = prices_to_df_yfinance(prices)
 
         progress.update_status("technical_analyst_agent", ticker, "Calculating trend signals")
         trend_signals = calculate_trend_signals(prices_df)

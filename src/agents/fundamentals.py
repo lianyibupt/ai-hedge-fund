@@ -3,7 +3,7 @@ from graph.state import AgentState, show_agent_reasoning
 from utils.progress import progress
 import json
 
-from tools.api import get_financial_metrics
+from tools.yfinance_api import get_financial_metrics_yfinance
 
 
 ##### Fundamental Agent #####
@@ -20,7 +20,7 @@ def fundamentals_agent(state: AgentState):
         progress.update_status("fundamentals_agent", ticker, "Fetching financial metrics")
 
         # Get the financial metrics
-        financial_metrics = get_financial_metrics(
+        financial_metrics = get_financial_metrics_yfinance(
             ticker=ticker,
             end_date=end_date,
             period="ttm",

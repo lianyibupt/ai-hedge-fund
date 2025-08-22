@@ -3,7 +3,7 @@ from graph.state import AgentState, show_agent_reasoning
 from utils.progress import progress
 import json
 
-from tools.api import get_financial_metrics, get_market_cap, search_line_items
+from tools.yfinance_api import get_financial_metrics_yfinance
 
 
 ##### Valuation Agent #####
@@ -20,7 +20,7 @@ def valuation_agent(state: AgentState):
         progress.update_status("valuation_agent", ticker, "Fetching financial data")
 
         # Fetch the financial metrics
-        financial_metrics = get_financial_metrics(
+        financial_metrics = get_financial_metrics_yfinance(
             ticker=ticker,
             end_date=end_date,
             period="ttm",
@@ -33,85 +33,44 @@ def valuation_agent(state: AgentState):
         
         metrics = financial_metrics[0]
 
-        progress.update_status("valuation_agent", ticker, "Gathering line items")
-        # Fetch the specific line_items that we need for valuation purposes
-        financial_line_items = search_line_items(
-            ticker=ticker,
-            line_items=[
-                "free_cash_flow",
-                "net_income",
-                "depreciation_and_amortization",
-                "capital_expenditure",
-                "working_capital",
-            ],
-            end_date=end_date,
-            period="ttm",
-            limit=2,
-        )
-
-        # Add safety check for financial line items
-        if len(financial_line_items) < 2:
-            progress.update_status("valuation_agent", ticker, "Failed: Insufficient financial line items")
+        progress.update_status("valuation_agent", ticker, "Calculating basic valuation")
+        # 使用基础估值方法
+        if not financial_metrics:
+            progress.update_status("valuation_agent", ticker, "Failed: No financial metrics found")
+            valuation_analysis[ticker] = {
+                "signal": "neutral",
+                "confidence": 50,
+                "reasoning": {"error": "无法获取财务数据"}
+            }
             continue
-
-        # Pull the current and previous financial line items
-        current_financial_line_item = financial_line_items[0]
-        previous_financial_line_item = financial_line_items[1]
-
-        progress.update_status("valuation_agent", ticker, "Calculating owner earnings")
-        # Calculate working capital change
-        working_capital_change = current_financial_line_item.working_capital - previous_financial_line_item.working_capital
-
-        # Owner Earnings Valuation (Buffett Method)
-        owner_earnings_value = calculate_owner_earnings_value(
-            net_income=current_financial_line_item.net_income,
-            depreciation=current_financial_line_item.depreciation_and_amortization,
-            capex=current_financial_line_item.capital_expenditure,
-            working_capital_change=working_capital_change,
-            growth_rate=metrics.earnings_growth,
-            required_return=0.15,
-            margin_of_safety=0.25,
-        )
-
-        progress.update_status("valuation_agent", ticker, "Calculating DCF value")
-        # DCF Valuation
-        dcf_value = calculate_intrinsic_value(
-            free_cash_flow=current_financial_line_item.free_cash_flow,
-            growth_rate=metrics.earnings_growth,
-            discount_rate=0.10,
-            terminal_growth_rate=0.03,
-            num_years=5,
-        )
-
-        progress.update_status("valuation_agent", ticker, "Comparing to market value")
-        # Get the market cap
-        market_cap = get_market_cap(ticker=ticker, end_date=end_date)
-
-        # Calculate combined valuation gap (average of both methods)
-        dcf_gap = (dcf_value - market_cap) / market_cap
-        owner_earnings_gap = (owner_earnings_value - market_cap) / market_cap
-        valuation_gap = (dcf_gap + owner_earnings_gap) / 2
-
-        if valuation_gap > 0.15:  # More than 15% undervalued
+        
+        metrics = financial_metrics[0]
+        
+        # 基于P/E比率的简单估值
+        pe_ratio = metrics.price_to_earnings_ratio or 20.0
+        pb_ratio = metrics.price_to_book_ratio or 3.0
+        
+        # 估值信号
+        if pe_ratio < 15 and pb_ratio < 2.5:
             signal = "bullish"
-        elif valuation_gap < -0.15:  # More than 15% overvalued
+            confidence = 80
+        elif pe_ratio > 30 or pb_ratio > 5:
             signal = "bearish"
+            confidence = 75
         else:
             signal = "neutral"
-
-        # Create the reasoning
-        reasoning = {}
-        reasoning["dcf_analysis"] = {
-            "signal": ("bullish" if dcf_gap > 0.15 else "bearish" if dcf_gap < -0.15 else "neutral"),
-            "details": f"Intrinsic Value: ${dcf_value:,.2f}, Market Cap: ${market_cap:,.2f}, Gap: {dcf_gap:.1%}",
+            confidence = 60
+        
+        reasoning = {
+            "pe_analysis": {
+                "signal": "低估" if pe_ratio < 15 else "高估" if pe_ratio > 30 else "合理",
+                "details": f"P/E比率: {pe_ratio:.1f}"
+            },
+            "pb_analysis": {
+                "signal": "低估" if pb_ratio < 2.5 else "高估" if pb_ratio > 5 else "合理",
+                "details": f"P/B比率: {pb_ratio:.1f}"
+            }
         }
-
-        reasoning["owner_earnings_analysis"] = {
-            "signal": ("bullish" if owner_earnings_gap > 0.15 else "bearish" if owner_earnings_gap < -0.15 else "neutral"),
-            "details": f"Owner Earnings Value: ${owner_earnings_value:,.2f}, Market Cap: ${market_cap:,.2f}, Gap: {owner_earnings_gap:.1%}",
-        }
-
-        confidence = round(abs(valuation_gap), 2) * 100
         valuation_analysis[ticker] = {
             "signal": signal,
             "confidence": confidence,

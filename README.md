@@ -129,6 +129,39 @@ You can optionally specify the start and end dates to backtest over a specific t
 poetry run python src/backtester.py --ticker AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01
 ```
 
+### 个人化交易系统 (Personal Trading System)
+
+我们提供了一个专门的个人化交易系统，适配2-3周交易周期和低频率交易需求。
+
+#### 特性
+- 📊 **交易周期**: 2-3周 (14-21天持仓期)
+- 🔄 **交易频率**: 2周内最多10次交易
+- 📊 **技术指标**: MACD + RSI + 布林带 + 成交量分析
+- 💹 **风险管理**: 只做多，不做空
+
+#### 运行个人化交易系统
+```bash
+# 基本使用
+poetry run python src/personal_main.py --tickers AAPL,MSFT,NVDA
+
+# 显示详细推理过程
+poetry run python src/personal_main.py --tickers AAPL,MSFT,NVDA --show-reasoning
+
+# 指定时间范围
+poetry run python src/personal_main.py --tickers AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-03-01
+```
+
+#### 运行个人化回测
+```bash
+# 基本回测
+poetry run python src/personal_backtester.py --tickers AAPL,MSFT,NVDA
+
+# 指定回测期间
+poetry run python src/personal_backtester.py --tickers AAPL,MSFT,NVDA --start-date 2024-01-01 --end-date 2024-12-01
+```
+
+📝 **详细使用说明**: [PERSONAL_TRADING_GUIDE.md](PERSONAL_TRADING_GUIDE.md)
+
 ## Project Structure 
 ```
 ai-hedge-fund/
