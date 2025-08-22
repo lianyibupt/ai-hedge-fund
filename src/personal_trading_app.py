@@ -15,8 +15,10 @@ load_dotenv()
 # 添加src目录到Python路径
 sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
 
-from tools.api import get_prices, prices_to_df, get_financial_metrics
+from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats
+from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
+import uuid
 
 # 页面配置
 st.set_page_config(
@@ -24,6 +26,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 获取数据库管理器
+db_manager = get_database_manager()
+
+# 生成会话ID
+if 'session_id' not in st.session_state:
+    st.session_state.session_id = str(uuid.uuid4())
 
 # CSS样式
 st.markdown("""
@@ -51,7 +60,7 @@ with st.sidebar:
     # 股票代码输入
     tickers_input = st.text_input(
         "股票代码 (逗号分隔)",
-        value="ZETA,RXRX,TUYA,BEKE,SEBT",
+        value="ZETA,RXRX,TUYA,BEKE,SBET",
         help="输入要分析的股票代码，多个代码用逗号分隔。支持美股、港股等"
     )
     
@@ -74,6 +83,8 @@ with st.sidebar:
     st.subheader("🔧 高级选项")
     show_detailed_indicators = st.checkbox("显示详细技术指标", value=False)
     show_historical_data = st.checkbox("显示历史数据", value=False)
+    show_query_history = st.checkbox("显示查询历史", value=False)
+    show_cache_stats = st.checkbox("显示缓存统计", value=False)
     auto_refresh = st.checkbox("自动刷新", value=False)
     
     if auto_refresh:
@@ -83,11 +94,46 @@ with st.sidebar:
             format_func=lambda x: f"{x}秒",
             index=1
         )
+    
+    # 数据库管理
+    st.subheader("🗄️ 数据库管理")
+    if st.button("清理过期缓存", help="清除过期的API缓存数据"):
+        cleanup_cache()
+        st.success("过期缓存已清理")
+    
+    # 缓存统计信息
+    if show_cache_stats:
+        st.subheader("📈 缓存统计")
+        with st.expander("缓存详情"):
+            cache_stats = get_cache_stats()
+            if cache_stats:
+                # 价格缓存统计
+                if 'price_cache' in cache_stats:
+                    price_cache = cache_stats['price_cache']
+                    st.write("**价格缓存:**")
+                    st.write(f"- 总记录数: {price_cache.get('total_records', 0)}")
+                    st.write(f"- 股票数量: {price_cache.get('unique_tickers', 0)}")
+                    st.write(f"- 有效记录: {price_cache.get('valid_records', 0)}")
+                
+                # 财务缓存统计
+                if 'financial_cache' in cache_stats:
+                    financial_cache = cache_stats['financial_cache']
+                    st.write("**财务缓存:**")
+                    st.write(f"- 总记录数: {financial_cache.get('total_records', 0)}")
+                    st.write(f"- 股票数量: {financial_cache.get('unique_tickers', 0)}")
+                    st.write(f"- 有效记录: {financial_cache.get('valid_records', 0)}")
+                
+                # 查询记录统计
+                if 'query_records' in cache_stats:
+                    query_records = cache_stats['query_records']
+                    st.write("**查询记录:**")
+                    st.write(f"- 总查询数: {query_records.get('total_queries', 0)}")
+                    st.write(f"- 查询天数: {query_records.get('query_days', 0)}")
 
 
-def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
+def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None):
     """
-    简化版股票分析 - 为Streamlit优化
+    简化版股票分析 - 为Streamlit优化，支持数据库记录
     """
     # 获取扩展的历史数据用于技术分析
     extended_start = (datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=90)).strftime("%Y-%m-%d")
@@ -135,12 +181,8 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
         progress_bar.progress(100)
         status_text.text("✅ 分析完成！")
         
-        # 清理进度显示
-        time.sleep(1)
-        progress_bar.empty()
-        status_text.empty()
-        
-        return {
+        # 组装结果
+        result = {
             'ticker': ticker,
             'current_price': prices_df['close'].iloc[-1],
             'analysis': analysis_result,
@@ -151,6 +193,20 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
             'data_days': len(prices_df),
             'prices_df': prices_df
         }
+        
+        # 保存分析结果到数据库（如果有查询记录ID）
+        if query_record_id:
+            try:
+                db_manager.save_analysis_result(query_record_id, result)
+            except Exception as e:
+                st.warning(f"⚠️ 保存分析结果失败: {str(e)}")
+        
+        # 清理进度显示
+        time.sleep(1)
+        progress_bar.empty()
+        status_text.empty()
+        
+        return result
         
     except Exception as e:
         progress_bar.empty()
@@ -408,9 +464,49 @@ def main():
         st.error("请输入股票代码")
         return
     
+    # 显示查询历史记录
+    if show_query_history:
+        st.subheader("📋 查询历史")
+        with st.expander("历史查询记录", expanded=False):
+            try:
+                # 获取查询历史
+                history_df = db_manager.get_query_history(limit=20)
+                if not history_df.empty:
+                    # 格式化显示
+                    display_df = history_df[['timestamp', 'tickers', 'start_date', 'end_date', 'result_count', 'avg_confidence']].copy()
+                    display_df['timestamp'] = pd.to_datetime(display_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
+                    display_df['tickers'] = display_df['tickers'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
+                    display_df.columns = ['查询时间', '股票代码', '开始日期', '结束日期', '结果数量', '平均信心度']
+                    st.dataframe(display_df, use_container_width=True)
+                else:
+                    st.info("暂无查询历史")
+            except Exception as e:
+                st.error(f"获取查询历史失败: {str(e)}")
+    
     # 运行分析按钮
     if st.button("🚀 开始分析", type="primary", use_container_width=True):
         st.markdown("---")
+        
+        # 保存查询记录到数据库
+        query_record_id = None
+        try:
+            analysis_params = {
+                'show_detailed_indicators': show_detailed_indicators,
+                'show_historical_data': show_historical_data,
+                'auto_refresh': auto_refresh
+            }
+            
+            query_record_id = db_manager.save_query_record(
+                tickers=tickers,
+                start_date=start_date.strftime("%Y-%m-%d"),
+                end_date=end_date.strftime("%Y-%m-%d"),
+                analysis_params=analysis_params,
+                session_id=st.session_state.session_id,
+                user_ip=None  # Streamlit不容易获取用户IP
+            )
+            st.success(f"📝 查询记录已保存 (ID: {query_record_id})")
+        except Exception as e:
+            st.warning(f"⚠️ 保存查询记录失败: {str(e)}")
         
         # 分析每只股票
         for i, ticker in enumerate(tickers):
@@ -421,7 +517,8 @@ def main():
                 result = analyze_stock_simple(
                     ticker, 
                     start_date.strftime("%Y-%m-%d"), 
-                    end_date.strftime("%Y-%m-%d")
+                    end_date.strftime("%Y-%m-%d"),
+                    query_record_id
                 )
                 
                 if result:
