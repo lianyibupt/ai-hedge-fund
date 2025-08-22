@@ -46,23 +46,47 @@ class iTickAPI:
         """
         url = f"{self.base_url}/{endpoint}"
         
+        # 验证API密钥
+        if not self.api_key or self.api_key == "YOUR_FREE_KEY":
+            raise Exception("iTick API 密钥未配置或无效。请设置环境变量 ITICK_API_KEY")
+        
         try:
-            response = self.session.get(url, params=params)
+            response = self.session.get(url, params=params, timeout=30)
             response.raise_for_status()
             
             data = response.json()
             
             # 检查API响应状态
-            if isinstance(data, dict) and data.get("code") != 0:
-                error_msg = data.get("msg", "Unknown error")
-                raise Exception(f"iTick API error: {error_msg}")
+            if isinstance(data, dict):
+                if data.get("code") != 0:
+                    error_msg = data.get("msg", "Unknown error")
+                    raise Exception(f"iTick API 返回错误: {error_msg} (错误代码: {data.get('code')})")
                 
+                # 检查数据是否为空
+                if "data" in data and not data["data"]:
+                    raise Exception("iTick API 返回空数据")
+                    
             return data
             
+        except requests.exceptions.Timeout:
+            raise Exception("iTick API 请求超时，请检查网络连接")
+        except requests.exceptions.ConnectionError:
+            raise Exception("无法连接到 iTick API 服务器，请检查网络连接")
+        except requests.exceptions.HTTPError as e:
+            if e.response.status_code == 401:
+                raise Exception("iTick API 认证失败，请检查API密钥是否正确")
+            elif e.response.status_code == 429:
+                raise Exception("iTick API 请求频率过高，请稍后重试")
+            elif e.response.status_code == 500:
+                raise Exception("iTick API 服务器内部错误")
+            else:
+                raise Exception(f"iTick API HTTP 错误: {e.response.status_code}")
         except requests.exceptions.RequestException as e:
-            raise Exception(f"请求 iTick API 失败: {str(e)}")
+            raise Exception(f"iTick API 请求失败: {str(e)}")
+        except ValueError as e:
+            raise Exception(f"iTick API 响应格式错误，无法解析JSON: {str(e)}")
         except Exception as e:
-            raise Exception(f"处理 iTick API 响应失败: {str(e)}")
+            raise Exception(f"iTick API 调用异常: {str(e)}")
     
     def get_real_time_price(self, ticker: str, region: str = "us") -> Dict[str, Any]:
         """
@@ -104,7 +128,14 @@ class iTickAPI:
             
         Returns:
             历史K线数据列表
+            
+        Raises:
+            Exception: API调用失败或数据为空时抛出异常
         """
+        # 验证股票代码
+        if not ticker or not ticker.strip():
+            raise Exception("股票代码不能为空")
+            
         # 期间到kType的映射（根据文档完整映射）
         period_to_ktype = {
             "1m": "1",    # 1分钟
@@ -119,23 +150,40 @@ class iTickAPI:
             "1M": "10"    # 1月
         }
         
+        if period not in period_to_ktype:
+            raise Exception(f"不支持的时间周期: {period}。支持的周期: {list(period_to_ktype.keys())}")
+        
         params = {
             "region": region,
-            "code": ticker,
-            "kType": period_to_ktype.get(period, "D"),  # 添加必需的kType参数
-            "limit": limit
+            "code": ticker.strip().upper(),
+            "kType": period_to_ktype[period],  # 添加必需的kType参数
+            "limit": min(limit, 5000)  # 限制最大请求数量
         }
         
         if start_time:
-            params["start_time"] = start_time
+            try:
+                # 验证时间戳格式
+                int(start_time)
+                params["start_time"] = start_time
+            except ValueError:
+                raise Exception(f"无效的开始时间戳: {start_time}")
+                
         if end_time:
-            params["end_time"] = end_time
+            try:
+                # 验证时间戳格式
+                int(end_time)
+                params["end_time"] = end_time
+            except ValueError:
+                raise Exception(f"无效的结束时间戳: {end_time}")
             
         response = self._make_request("stock/kline", params)
         
         # 返回数据列表，通常在 'data' 字段中
         if isinstance(response, dict):
-            return response.get("data", [])
+            data = response.get("data", [])
+            if not data:
+                raise Exception(f"获取 {ticker} 的K线数据为空，请检查股票代码或时间参数")
+            return data
         return []
     
     def get_company_info(self, ticker: str, region: str = "us") -> Dict[str, Any]:
@@ -188,10 +236,20 @@ class iTickAPI:
             
         Returns:
             Price对象列表
+            
+        Raises:
+            Exception: 数据转换失败时抛出异常
         """
-        prices = []
+        if not kline_data:
+            raise Exception(f"无法转换空的K线数据为 Price 对象，股票代码: {ticker}")
+            
+        if not isinstance(kline_data, list):
+            raise Exception(f"K线数据必须是列表类型，当前类型: {type(kline_data)}")
         
-        for item in kline_data:
+        prices = []
+        invalid_count = 0
+        
+        for i, item in enumerate(kline_data):
             try:
                 # iTick API 返回格式：
                 # {
@@ -203,37 +261,86 @@ class iTickAPI:
                 #   "v": volume,        // 成交数量
                 #   "tu": turnover      // 成交金额
                 # }
-                if isinstance(item, dict):
-                    timestamp = item.get("t")  # 时间戳
-                    open_price = item.get("o")  # 开盘价
-                    high = item.get("h")        # 最高价
-                    low = item.get("l")         # 最低价
-                    close = item.get("c")       # 收盘价
-                    volume = item.get("v", 0)   # 成交数量
-                    
-                    if timestamp and open_price is not None and close is not None:
-                        # 将毫秒级时间戳转换为日期字符串
-                        date_str = datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d")
-                        
-                        prices.append(Price(
-                            open=float(open_price),
-                            close=float(close),
-                            high=float(high or close),
-                            low=float(low or close), 
-                            volume=int(volume),
-                            time=date_str
-                        ))
-                    else:
-                        print(f"⚠️ 跳过无效的K线数据项: {item}")
-                        continue
-                else:
+                if not isinstance(item, dict):
                     print(f"⚠️ 跳过非字典格式的数据: {item}")
+                    invalid_count += 1
+                    continue
+                    
+                timestamp = item.get("t")  # 时间戳
+                open_price = item.get("o")  # 开盘价
+                high = item.get("h")        # 最高价
+                low = item.get("l")         # 最低价
+                close = item.get("c")       # 收盘价
+                volume = item.get("v", 0)   # 成交数量
+                
+                # 验证必要字段
+                if timestamp is None:
+                    print(f"⚠️ 跳过缺少时间戳的K线数据项: {item}")
+                    invalid_count += 1
+                    continue
+                    
+                if open_price is None or close is None:
+                    print(f"⚠️ 跳过缺少价格数据的K线数据项: {item}")
+                    invalid_count += 1
+                    continue
+                    
+                # 转换和验证数据类型
+                try:
+                    timestamp = int(timestamp)
+                    open_price = float(open_price)
+                    close = float(close)
+                    high = float(high or close)
+                    low = float(low or close)
+                    volume = int(volume) if volume is not None else 0
+                    
+                    # 验证价格的合理性
+                    if open_price <= 0 or close <= 0 or high <= 0 or low <= 0:
+                        print(f"⚠️ 跳过价格为非正数的K线数据项: {item}")
+                        invalid_count += 1
+                        continue
+                        
+                    if high < max(open_price, close) or low > min(open_price, close):
+                        print(f"⚠️ 跳过价格逻辑不合理的K线数据项: {item}")
+                        invalid_count += 1
+                        continue
+                        
+                    # 将毫秒级时间戳转换为日期字符串
+                    try:
+                        if timestamp > 1e10:  # 毫秒级时间戳
+                            date_str = datetime.fromtimestamp(timestamp / 1000).strftime("%Y-%m-%d")
+                        else:  # 秒级时间戳
+                            date_str = datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d")
+                    except (ValueError, OSError) as e:
+                        print(f"⚠️ 跳过无效时间戳的K线数据项: {item}, 错误: {str(e)}")
+                        invalid_count += 1
+                        continue
+                    
+                    prices.append(Price(
+                        open=open_price,
+                        close=close,
+                        high=high,
+                        low=low, 
+                        volume=volume,
+                        time=date_str
+                    ))
+                    
+                except (ValueError, TypeError) as e:
+                    print(f"⚠️ 跳过无效的数据类型转换: {item}, 错误: {str(e)}")
+                    invalid_count += 1
                     continue
                 
-            except (ValueError, TypeError, KeyError) as e:
-                print(f"⚠️ 跳过无效的K线数据项: {item}, 错误: {str(e)}")
+            except Exception as e:
+                print(f"⚠️ 跳过无效的K线数据项 {i}: {item}, 错误: {str(e)}")
+                invalid_count += 1
                 continue
         
+        # 检查转换结果
+        if not prices:
+            raise Exception(f"无法从 {len(kline_data)} 条K线数据中转换出任何有效的 Price 对象，股票代码: {ticker}")
+            
+        if invalid_count > 0:
+            print(f"⚠️ 共跳过 {invalid_count} 条无效的K线数据项，成功转换 {len(prices)} 条数据")
+            
         return prices
     
     def convert_to_financial_metrics(
@@ -336,14 +443,26 @@ class iTickAPI:
         
         Returns:
             连接是否成功
+            
+        Raises:
+            Exception: API连接测试失败时抛出异常
         """
         try:
+            print("🔄 正在测试 iTick API 连接...")
             # 使用AAPL测试连接
-            self.get_real_time_price("AAPL")
+            response = self.get_real_time_price("AAPL")
+            
+            # 验证响应数据
+            if not response or not isinstance(response, dict):
+                raise Exception("API返回无效响应")
+                
+            print("✅ iTick API 连接测试成功")
             return True
+            
         except Exception as e:
-            print(f"iTick API 连接测试失败: {str(e)}")
-            return False
+            error_msg = f"iTick API 连接测试失败: {str(e)}"
+            print(f"❌ {error_msg}")
+            raise Exception(error_msg)
 
 
 def date_to_timestamp(date_str: str) -> int:

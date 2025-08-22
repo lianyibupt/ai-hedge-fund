@@ -9,6 +9,10 @@ import argparse
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from colorama import Fore, Style, init
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 # 添加src目录到Python路径
 sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
@@ -49,15 +53,20 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
     print(f"🔍 开始技术分析...")
     analysis_result = generate_comprehensive_signal(prices_df)
     
-    # 获取基本财务信息
+    # 获取基本财务信息（可选，失败时不影响技术分析）
     print(f"💰 获取财务指标...")
-    financial_metrics = get_financial_metrics(ticker, end_date)
-    
     pe_ratio = None
     pb_ratio = None
-    if financial_metrics:
-        pe_ratio = financial_metrics[0].price_to_earnings_ratio
-        pb_ratio = financial_metrics[0].price_to_book_ratio
+    try:
+        financial_metrics = get_financial_metrics(ticker, end_date)
+        if financial_metrics:
+            pe_ratio = financial_metrics[0].price_to_earnings_ratio
+            pb_ratio = financial_metrics[0].price_to_book_ratio
+            print(f"✅ 成功获取财务指标")
+        else:
+            print(f"⚠️ 财务指标为空，继续进行技术分析")
+    except Exception as e:
+        print(f"⚠️ 财务指标获取失败: {str(e)}，继续进行技术分析")
     
     return {
         'ticker': ticker,
@@ -83,10 +92,10 @@ def generate_trading_recommendation(analysis_result):
     reason = analysis_result['analysis']['reason']
     
     # 生成建议
-    if signal == 'bullish' and confidence >= 60:
+    if signal == '看涨' and confidence >= 60:
         recommendation = f"🟢 买入建议 (信心度: {confidence}%)"
         action = "考虑买入"
-    elif signal == 'bearish' and confidence >= 60:
+    elif signal == '看跌' and confidence >= 60:
         recommendation = f"🔴 卖出建议 (信心度: {confidence}%)"
         action = "考虑卖出"
     else:
@@ -99,6 +108,102 @@ def generate_trading_recommendation(analysis_result):
         'reason': reason,
         'confidence': confidence
     }
+
+
+def print_detailed_indicators(analysis):
+    """
+    打印详细的技术指标数据
+    """
+    print(f"\n📊 详细技术指标数据:")
+    print(f"="*60)
+    
+    # MACD详细数据
+    macd_details = analysis['details']['macd']
+    print(f"\n📈 MACD指标:")
+    print(f"   当前DIF: {macd_details['current_dif']:.4f}")
+    print(f"   当前DEA: {macd_details['current_dea']:.4f}")
+    print(f"   MACD柱状图: {macd_details['macd_histogram']:.4f}")
+    print(f"   DIF-DEA差值: {macd_details['dif_dea_diff']:.4f}")
+    print(f"   DIF趋势: {macd_details['dif_trend']}")
+    print(f"   DIF在0轴上方: {'是' if macd_details['dif_above_zero'] else '否'}")
+    print(f"   金叉: {'是' if macd_details['is_golden_cross'] else '否'}")
+    print(f"   死叉: {'是' if macd_details['is_death_cross'] else '否'}")
+    
+    # RSI详细数据
+    rsi_details = analysis['details']['rsi']
+    print(f"\n📊 RSI指标:")
+    print(f"   当前RSI: {rsi_details['current_rsi']:.2f}")
+    print(f"   前一期RSI: {rsi_details['prev_rsi']:.2f}")
+    print(f"   RSI趋势: {rsi_details['rsi_trend']}")
+    print(f"   超买状态: {'是' if rsi_details['is_overbought'] else '否'}")
+    print(f"   超卖状态: {'是' if rsi_details['is_oversold'] else '否'}")
+    print(f"   超卖恢复: {'是' if rsi_details['is_oversold_recovery'] else '否'}")
+    print(f"   超买回落: {'是' if rsi_details['is_overbought_decline'] else '否'}")
+    
+    # 布林带详细数据
+    boll_details = analysis['details']['bollinger']
+    print(f"\n📉 布林带指标:")
+    print(f"   当前价格: {boll_details['current_close']:.2f}")
+    print(f"   上轨: {boll_details['current_upper']:.2f}")
+    print(f"   中轨: {boll_details['current_middle']:.2f}")
+    print(f"   下轨: {boll_details['current_lower']:.2f}")
+    print(f"   带宽: {boll_details['band_width']:.2f}%")
+    print(f"   价格位置: {boll_details['price_position']:.2%}")
+    print(f"   中轨趋势: {boll_details['middle_trend']}")
+    print(f"   触及上轨: {'是' if boll_details['is_touching_upper'] else '否'}")
+    print(f"   触及下轨: {'是' if boll_details['is_touching_lower'] else '否'}")
+    print(f"   长下影线: {'是' if boll_details['has_long_lower_shadow'] else '否'}")
+    print(f"   长上影线: {'是' if boll_details['has_long_upper_shadow'] else '否'}")
+    
+    # 成交量详细数据
+    volume_details = analysis['details']['volume']
+    print(f"\n📊 成交量指标:")
+    print(f"   当前成交量: {volume_details['current_volume']:,.0f}")
+    print(f"   平均成交量: {volume_details['avg_volume']:,.0f}")
+    print(f"   成交量比率: {volume_details['volume_ratio']:.2f}")
+    print(f"   成交量趋势: {volume_details['volume_trend']}")
+    print(f"   放量: {'是' if volume_details['is_surge'] else '否'}")
+    
+    # 历史数据（最近5期）
+    if 'raw_data' in analysis:
+        raw_data = analysis['raw_data']
+        print(f"\n📈 历史数据（最近5期）:")
+        
+        # 价格数据
+        print(f"\n   价格数据:")
+        closes = raw_data['price_data']['close']
+        highs = raw_data['price_data']['high']
+        lows = raw_data['price_data']['low']
+        for i, (close, high, low) in enumerate(zip(closes, highs, lows)):
+            print(f"     期{i+1}: 收盘={close:.2f}, 最高={high:.2f}, 最低={low:.2f}")
+        
+        # MACD历史数据
+        print(f"\n   MACD历史数据:")
+        difs = raw_data['macd_data']['dif']
+        deas = raw_data['macd_data']['dea']
+        macds = raw_data['macd_data']['macd']
+        for i, (dif, dea, macd) in enumerate(zip(difs, deas, macds)):
+            print(f"     期{i+1}: DIF={dif:.4f}, DEA={dea:.4f}, MACD={macd:.4f}")
+        
+        # RSI历史数据
+        print(f"\n   RSI历史数据:")
+        rsis = raw_data['rsi_data']
+        for i, rsi in enumerate(rsis):
+            print(f"     期{i+1}: RSI={rsi:.2f}")
+        
+        # 布林带历史数据
+        print(f"\n   布林带历史数据:")
+        uppers = raw_data['bollinger_data']['upper']
+        middles = raw_data['bollinger_data']['middle']
+        lowers = raw_data['bollinger_data']['lower']
+        for i, (upper, middle, lower) in enumerate(zip(uppers, middles, lowers)):
+            print(f"     期{i+1}: 上轨={upper:.2f}, 中轨={middle:.2f}, 下轨={lower:.2f}")
+        
+        # 成交量比率历史数据
+        print(f"\n   成交量比率历史数据:")
+        volume_ratios = raw_data['volume_data']['volume_ratio']
+        for i, ratio in enumerate(volume_ratios):
+            print(f"     期{i+1}: 成交量比率={ratio:.2f}")
 
 
 def print_analysis_report(result):
@@ -142,7 +247,7 @@ def print_analysis_report(result):
     ]
     
     for name, data in indicators:
-        signal_color = Fore.GREEN if data['signal'] == 'bullish' else Fore.RED if data['signal'] == 'bearish' else Fore.YELLOW
+        signal_color = Fore.GREEN if data['signal'] == '看涨' else Fore.RED if data['signal'] == '看跌' else Fore.YELLOW
         print(f"   {name}: {signal_color}{data['signal']}{Style.RESET_ALL} - {data['reason']}")
     
     # 生成交易建议
@@ -151,10 +256,14 @@ def print_analysis_report(result):
     print(f"   {recommendation['recommendation']}")
     print(f"   行动: {recommendation['action']}")
     
+    # 显示详细指标数据
+    print_detailed_indicators(analysis)
+    
     print(f"\n⚠️  风险提示:")
     print(f"   • 本分析仅供参考，不构成投资建议")
     print(f"   • 投资有风险，决策需谨慎")
     print(f"   • 建议结合基本面分析和市场环境")
+    print(f"   • 技术指标具有滞后性，不能预测未来")
     print(f"="*60)
 
 

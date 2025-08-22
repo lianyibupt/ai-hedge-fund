@@ -146,12 +146,15 @@ def analyze_macd_signals(macd_data: Dict[str, pd.Series]) -> Dict[str, Any]:
     
     if len(dif) < 2 or len(dea) < 2:
         return {
-            'signal': 'neutral',
+            'signal': '中性',
             'reason': '数据不足',
             'is_golden_cross': False,
             'is_death_cross': False,
             'dif_above_zero': False,
-            'dif_trend': 'neutral'
+            'dif_trend': '中性',
+            'current_dif': 0.0,
+            'current_dea': 0.0,
+            'macd_histogram': 0.0
         }
     
     # 获取最新和前一个值
@@ -169,28 +172,37 @@ def analyze_macd_signals(macd_data: Dict[str, pd.Series]) -> Dict[str, Any]:
     
     # 判断DIF趋势
     if current_dif > prev_dif:
-        dif_trend = 'up'
+        dif_trend = '上升'
     elif current_dif < prev_dif:
-        dif_trend = 'down'
+        dif_trend = '下降'
     else:
-        dif_trend = 'neutral'
+        dif_trend = '平缓'
     
     # 生成信号
-    signal = 'neutral'
+    signal = '中性'
     reason = ''
     
-    if is_golden_cross and not dif_above_zero and dif_trend == 'up':
-        signal = 'bullish'
+    if is_golden_cross and not dif_above_zero and dif_trend == '上升':
+        signal = '看涨'
         reason = 'DIF在0轴下方金叉DEA且向上发散'
-    elif dif_above_zero and dif_trend == 'up' and current_dif > current_dea:
-        signal = 'bullish'
+    elif dif_above_zero and dif_trend == '上升' and current_dif > current_dea:
+        signal = '看涨'
         reason = 'DIF在0轴上方向上，趋势延续'
+    elif is_golden_cross and dif_above_zero:
+        signal = '看涨'
+        reason = 'DIF在0轴上方金叉DEA'
     elif is_death_cross and dif_above_zero:
-        signal = 'bearish'
+        signal = '看跌'
         reason = 'DIF在0轴上方死叉DEA'
-    elif dif_trend == 'down' and current_dif > 0:
-        signal = 'bearish'
+    elif dif_trend == '下降' and current_dif > 0:
+        signal = '看跌'
         reason = 'DIF在高位拐头向下'
+    elif not dif_above_zero and is_death_cross:
+        signal = '看跌'
+        reason = 'DIF在0轴下方死叉DEA'
+    
+    # 计算MACD柱状图
+    current_macd = macd_data['macd'].iloc[-1] if len(macd_data['macd']) > 0 else 0.0
     
     return {
         'signal': signal,
@@ -200,7 +212,9 @@ def analyze_macd_signals(macd_data: Dict[str, pd.Series]) -> Dict[str, Any]:
         'dif_above_zero': dif_above_zero,
         'dif_trend': dif_trend,
         'current_dif': float(current_dif),
-        'current_dea': float(current_dea)
+        'current_dea': float(current_dea),
+        'macd_histogram': float(current_macd),
+        'dif_dea_diff': float(current_dif - current_dea)
     }
 
 
@@ -216,15 +230,25 @@ def analyze_rsi_signals(rsi: pd.Series) -> Dict[str, Any]:
     """
     if len(rsi) < 2:
         return {
-            'signal': 'neutral',
+            'signal': '中性',
             'reason': '数据不足',
             'current_rsi': 50.0,
+            'prev_rsi': 50.0,
             'is_oversold_recovery': False,
-            'is_overbought_decline': False
+            'is_overbought_decline': False,
+            'rsi_trend': '平缓'
         }
     
     current_rsi = rsi.iloc[-1]
     prev_rsi = rsi.iloc[-2]
+    
+    # 判断RSI趋势
+    if current_rsi > prev_rsi:
+        rsi_trend = '上升'
+    elif current_rsi < prev_rsi:
+        rsi_trend = '下降'
+    else:
+        rsi_trend = '平缓'
     
     # 检测超卖恢复
     is_oversold_recovery = prev_rsi <= 30 and current_rsi > 40 and current_rsi < 70
@@ -233,28 +257,38 @@ def analyze_rsi_signals(rsi: pd.Series) -> Dict[str, Any]:
     is_overbought_decline = prev_rsi >= 70 and current_rsi < 60
     
     # 生成信号
-    signal = 'neutral'
+    signal = '中性'
     reason = ''
     
     if is_oversold_recovery:
-        signal = 'bullish'
+        signal = '看涨'
         reason = f'RSI从{prev_rsi:.1f}回升至{current_rsi:.1f}，突破超卖区'
     elif is_overbought_decline:
-        signal = 'bearish'
+        signal = '看跌'
         reason = f'RSI从{prev_rsi:.1f}回落至{current_rsi:.1f}，离开超买区'
     elif current_rsi > 70:
-        signal = 'bearish'
+        signal = '看跌'
         reason = f'RSI高于70({current_rsi:.1f})，进入超买区'
     elif current_rsi < 30:
-        signal = 'bullish'
+        signal = '看涨'
         reason = f'RSI低于30({current_rsi:.1f})，进入超卖区'
+    elif current_rsi >= 50 and rsi_trend == '上升':
+        signal = '看涨'
+        reason = f'RSI在中性区上方({current_rsi:.1f})且上升'
+    elif current_rsi <= 50 and rsi_trend == '下降':
+        signal = '看跌'
+        reason = f'RSI在中性区下方({current_rsi:.1f})且下降'
     
     return {
         'signal': signal,
         'reason': reason,
         'current_rsi': float(current_rsi),
+        'prev_rsi': float(prev_rsi),
+        'rsi_trend': rsi_trend,
         'is_oversold_recovery': bool(is_oversold_recovery),
-        'is_overbought_decline': bool(is_overbought_decline)
+        'is_overbought_decline': bool(is_overbought_decline),
+        'is_oversold': current_rsi < 30,
+        'is_overbought': current_rsi > 70
     }
 
 
@@ -271,12 +305,16 @@ def analyze_bollinger_signals(prices_df: pd.DataFrame, boll_data: Dict[str, pd.S
     """
     if len(prices_df) < 2:
         return {
-            'signal': 'neutral',
+            'signal': '中性',
             'reason': '数据不足',
             'price_position': 0.5,
             'is_touching_lower': False,
             'is_touching_upper': False,
-            'middle_trend': 'neutral'
+            'middle_trend': '中性',
+            'current_upper': 0.0,
+            'current_middle': 0.0,
+            'current_lower': 0.0,
+            'current_close': 0.0
         }
     
     close = prices_df['close']
@@ -303,9 +341,9 @@ def analyze_bollinger_signals(prices_df: pd.DataFrame, boll_data: Dict[str, pd.S
     
     # 判断中轨趋势
     if len(middle) >= 2:
-        middle_trend = 'up' if middle.iloc[-1] > middle.iloc[-2] else 'down' if middle.iloc[-1] < middle.iloc[-2] else 'neutral'
+        middle_trend = '上升' if middle.iloc[-1] > middle.iloc[-2] else '下降' if middle.iloc[-1] < middle.iloc[-2] else '平缓'
     else:
-        middle_trend = 'neutral'
+        middle_trend = '平缓'
     
     # 检测长下影线（企稳信号）
     has_long_lower_shadow = (current_close - current_low) > (current_high - current_close) * 2
@@ -314,21 +352,27 @@ def analyze_bollinger_signals(prices_df: pd.DataFrame, boll_data: Dict[str, pd.S
     has_long_upper_shadow = (current_high - current_close) > (current_close - current_low) * 2
     
     # 生成信号
-    signal = 'neutral'
+    signal = '中性'
     reason = ''
     
-    if is_touching_lower and has_long_lower_shadow and middle_trend == 'up':
-        signal = 'bullish'
+    if is_touching_lower and has_long_lower_shadow and middle_trend == '上升':
+        signal = '看涨'
         reason = '价格触及布林下轨并出现长下影线，中轨向上'
     elif is_touching_upper and has_long_upper_shadow:
-        signal = 'bearish'
+        signal = '看跌'
         reason = '价格触及布林上轨并出现长上影线'
-    elif price_position < 0.2 and middle_trend == 'up':
-        signal = 'bullish'
+    elif price_position < 0.2 and middle_trend == '上升':
+        signal = '看涨'
         reason = '价格接近布林下轨，中轨向上'
     elif price_position > 0.8:
-        signal = 'bearish'
+        signal = '看跌'
         reason = '价格接近布林上轨，可能回调'
+    elif is_touching_lower and not has_long_lower_shadow:
+        signal = '看涨'
+        reason = '价格触及布林下轨，支撑位'
+    elif price_position < 0.3 and middle_trend != '下降':
+        signal = '看涨'
+        reason = '价格在布林下轨附近，中轨非下降趋势'
     
     return {
         'signal': signal,
@@ -338,7 +382,12 @@ def analyze_bollinger_signals(prices_df: pd.DataFrame, boll_data: Dict[str, pd.S
         'is_touching_upper': bool(is_touching_upper),
         'middle_trend': middle_trend,
         'has_long_lower_shadow': bool(has_long_lower_shadow),
-        'has_long_upper_shadow': bool(has_long_upper_shadow)
+        'has_long_upper_shadow': bool(has_long_upper_shadow),
+        'current_upper': float(current_upper),
+        'current_middle': float(current_middle),
+        'current_lower': float(current_lower),
+        'current_close': float(current_close),
+        'band_width': float((current_upper - current_lower) / current_middle * 100)
     }
 
 
@@ -355,21 +404,35 @@ def analyze_volume_signals(volume_analysis: Dict[str, Any]) -> Dict[str, Any]:
     latest_ratio = volume_analysis['latest_ratio']
     is_volume_surge = volume_analysis['is_volume_surge']
     
-    signal = 'neutral'
+    signal = '中性'
     reason = ''
     
     if is_volume_surge:
-        signal = 'bullish'
+        signal = '看涨'
         reason = f'成交量放大{latest_ratio:.1f}倍，资金进场'
     elif latest_ratio < 0.7:
-        signal = 'bearish'
+        signal = '看跌'
         reason = f'成交量萎缩({latest_ratio:.1f}倍)，缺乏资金支持'
+    elif latest_ratio >= 1.2:
+        signal = '看涨'
+        reason = f'成交量温和放大({latest_ratio:.1f}倍)'
+    elif latest_ratio < 0.8:
+        signal = '看跌'
+        reason = f'成交量偏低({latest_ratio:.1f}倍)'
+    
+    # 获取最新成交量数据
+    volume_ma = volume_analysis['volume_ma']
+    current_volume = volume_ma.iloc[-1] * latest_ratio if len(volume_ma) > 0 else 0
+    avg_volume = volume_ma.iloc[-1] if len(volume_ma) > 0 else 0
     
     return {
         'signal': signal,
         'reason': reason,
         'volume_ratio': float(latest_ratio),
-        'is_surge': bool(is_volume_surge)
+        'is_surge': bool(is_volume_surge),
+        'current_volume': float(current_volume),
+        'avg_volume': float(avg_volume),
+        'volume_trend': '放量' if latest_ratio >= 1.2 else '缩量' if latest_ratio < 0.8 else '正常'
     }
 
 
@@ -385,7 +448,7 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
     """
     if len(prices_df) < 30:  # 需要足够的数据进行计算
         return {
-            'signal': 'neutral',
+            'signal': '中性',
             'confidence': 0,
             'reason': '数据不足，无法进行技术分析'
         }
@@ -423,22 +486,22 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
         signal_name = signal_names[i]
         weight = weights[signal_name]
         
-        if signal_data['signal'] == 'bullish':
+        if signal_data['signal'] == '看涨':
             bullish_score += weight
             reasons.append(f"{signal_name.upper()}: {signal_data['reason']}")
-        elif signal_data['signal'] == 'bearish':
+        elif signal_data['signal'] == '看跌':
             bearish_score += weight
             reasons.append(f"{signal_name.upper()}: {signal_data['reason']}")
     
     # 生成最终信号
     if bullish_score > bearish_score and bullish_score >= 0.5:
-        final_signal = 'bullish'
+        final_signal = '看涨'
         confidence = int(bullish_score * 100)
     elif bearish_score > bullish_score and bearish_score >= 0.5:
-        final_signal = 'bearish'
+        final_signal = '看跌'
         confidence = int(bearish_score * 100)
     else:
-        final_signal = 'neutral'
+        final_signal = '中性'
         confidence = 50
     
     return {
@@ -454,5 +517,26 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
         'scores': {
             'bullish_score': round(bullish_score, 2),
             'bearish_score': round(bearish_score, 2)
+        },
+        'raw_data': {
+            'macd_data': {
+                'dif': macd_data['dif'].iloc[-5:].tolist() if len(macd_data['dif']) >= 5 else macd_data['dif'].tolist(),
+                'dea': macd_data['dea'].iloc[-5:].tolist() if len(macd_data['dea']) >= 5 else macd_data['dea'].tolist(),
+                'macd': macd_data['macd'].iloc[-5:].tolist() if len(macd_data['macd']) >= 5 else macd_data['macd'].tolist()
+            },
+            'rsi_data': rsi.iloc[-5:].tolist() if len(rsi) >= 5 else rsi.tolist(),
+            'bollinger_data': {
+                'upper': boll_data['upper'].iloc[-5:].tolist() if len(boll_data['upper']) >= 5 else boll_data['upper'].tolist(),
+                'middle': boll_data['middle'].iloc[-5:].tolist() if len(boll_data['middle']) >= 5 else boll_data['middle'].tolist(),
+                'lower': boll_data['lower'].iloc[-5:].tolist() if len(boll_data['lower']) >= 5 else boll_data['lower'].tolist()
+            },
+            'volume_data': {
+                'volume_ratio': volume_analysis['volume_ratio'].iloc[-5:].tolist() if len(volume_analysis['volume_ratio']) >= 5 else volume_analysis['volume_ratio'].tolist()
+            },
+            'price_data': {
+                'close': prices_df['close'].iloc[-5:].tolist() if len(prices_df) >= 5 else prices_df['close'].tolist(),
+                'high': prices_df['high'].iloc[-5:].tolist() if len(prices_df) >= 5 else prices_df['high'].tolist(),
+                'low': prices_df['low'].iloc[-5:].tolist() if len(prices_df) >= 5 else prices_df['low'].tolist()
+            }
         }
     }

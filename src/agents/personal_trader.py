@@ -5,6 +5,7 @@
 """
 
 import json
+import numpy as np
 from langchain_core.messages import HumanMessage
 from graph.state import AgentState, show_agent_reasoning
 from tools.api import get_prices, prices_to_df
@@ -21,6 +22,24 @@ from utils.personal_indicators import (
     generate_comprehensive_signal
 )
 from datetime import datetime, timedelta
+
+
+def convert_numpy_types(obj):
+    """转换NumPy类型为Python原生类型，用于JSON序列化"""
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    else:
+        return obj
 
 
 def personal_trader_agent(state: AgentState):
@@ -82,9 +101,10 @@ def personal_trader_agent(state: AgentState):
 
         progress.update_status("personal_trader_agent", ticker, "完成")
 
-    # 创建消息
+    # 创建消息（先转换NumPy类型）
+    personal_analysis_clean = convert_numpy_types(personal_analysis)
     message = HumanMessage(
-        content=json.dumps(personal_analysis),
+        content=json.dumps(personal_analysis_clean),
         name="personal_trader_agent",
     )
 

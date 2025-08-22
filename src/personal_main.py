@@ -112,20 +112,19 @@ def create_personal_workflow():
     workflow = StateGraph(AgentState)
     workflow.add_node("start_node", start_personal)
     
-    # 添加个性化交易代理（核心） - 简化版本
+    # 添加个性化交易代理（核心） - 纯技术分析版本
     workflow.add_node("personal_trader_agent", personal_trader_agent)
     
-    # 添加基础分析代理（精简版）
-    workflow.add_node("fundamentals_agent", fundamentals_agent)
+    # 跳过基础分析代理，专注技术分析
+    # workflow.add_node("fundamentals_agent", fundamentals_agent)
     
     # 添加风险管理和投资组合管理
     workflow.add_node("risk_management_agent", risk_management_agent)
     workflow.add_node("personal_portfolio_management_agent", personal_portfolio_management_agent)
 
-    # 设置顺序连接关系 - 避免并发问题
+    # 设置顺序连接关系 - 避免并发问题，跳过基础分析
     workflow.add_edge("start_node", "personal_trader_agent")
-    workflow.add_edge("personal_trader_agent", "fundamentals_agent")
-    workflow.add_edge("fundamentals_agent", "risk_management_agent")
+    workflow.add_edge("personal_trader_agent", "risk_management_agent")
     workflow.add_edge("risk_management_agent", "personal_portfolio_management_agent")
     workflow.add_edge("personal_portfolio_management_agent", END)
 
