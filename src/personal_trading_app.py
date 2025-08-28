@@ -16,6 +16,7 @@ load_dotenv()
 sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
 
 from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats
+from data.cache import get_cache
 from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
 import uuid
@@ -27,8 +28,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 获取数据库管理器
+# 获取数据库管理器和缓存实例
 db_manager = get_database_manager()
+cache_instance = get_cache()
 
 # 生成会话ID
 if 'session_id' not in st.session_state:
@@ -96,39 +98,94 @@ with st.sidebar:
         )
     
     # 数据库管理
-    st.subheader("🗄️ 数据库管理")
-    if st.button("清理过期缓存", help="清除过期的API缓存数据"):
-        cleanup_cache()
-        st.success("过期缓存已清理")
+    st.subheader("🗄️ 数据管理")
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        if st.button("清理过期缓存", help="清除过期的API缓存数据"):
+            # 清理内存缓存
+            expired_count = cache_instance.clear_expired_cache()
+            # 清理数据库缓存
+            cleanup_cache()
+            st.success(f"过期缓存已清理，清除了 {expired_count} 个过期条目")
+    
+    with col2:
+        if st.button("刷新缓存统计", help="重新计算缓存统计数据"):
+            st.rerun()
     
     # 缓存统计信息
     if show_cache_stats:
         st.subheader("📈 缓存统计")
-        with st.expander("缓存详情"):
-            cache_stats = get_cache_stats()
-            if cache_stats:
+        with st.expander("缓存详情", expanded=True):
+            # 获取内存缓存统计
+            memory_cache_stats = cache_instance.get_cache_stats()
+            
+            # 显示内存缓存统计
+            if memory_cache_stats:
+                st.markdown("**内存缓存统计:**")
+                
+                # 总体统计
+                summary = memory_cache_stats.get('cache_summary', {})
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.metric("缓存股票数量", summary.get('total_tickers', 0))
+                with col2:
+                    st.metric("总缓存条目", summary.get('total_cache_entries', 0))
+                with col3:
+                    st.metric("新鲜条目", summary.get('fresh_entries', 0))
+                
+                # 价格缓存详情
+                price_cache = memory_cache_stats.get('price_cache', {})
+                st.markdown("**价格缓存:**")
+                pcol1, pcol2, pcol3 = st.columns(3)
+                with pcol1:
+                    st.write(f"- 股票数量: {price_cache.get('tickers_count', 0)}")
+                with pcol2:
+                    st.write(f"- 日期条目: {price_cache.get('total_date_entries', 0)}")
+                with pcol3:
+                    st.write(f"- 新鲜条目: {price_cache.get('fresh_entries', 0)}")
+                
+                # 财务缓存详情
+                financial_cache = memory_cache_stats.get('financial_cache', {})
+                st.markdown("**财务缓存:**")
+                fcol1, fcol2, fcol3 = st.columns(3)
+                with fcol1:
+                    st.write(f"- 股票数量: {financial_cache.get('tickers_count', 0)}")
+                with fcol2:
+                    st.write(f"- 期间条目: {financial_cache.get('total_period_entries', 0)}")
+                with fcol3:
+                    st.write(f"- 新鲜条目: {financial_cache.get('fresh_entries', 0)}")
+            
+            # 获取数据库缓存统计
+            st.markdown("---")
+            st.markdown("**数据库缓存统计:**")
+            db_cache_stats = get_cache_stats()
+            if db_cache_stats:
                 # 价格缓存统计
-                if 'price_cache' in cache_stats:
-                    price_cache = cache_stats['price_cache']
-                    st.write("**价格缓存:**")
+                if 'price_cache' in db_cache_stats:
+                    price_cache = db_cache_stats['price_cache']
+                    st.write("**数据库价格缓存:**")
                     st.write(f"- 总记录数: {price_cache.get('total_records', 0)}")
                     st.write(f"- 股票数量: {price_cache.get('unique_tickers', 0)}")
                     st.write(f"- 有效记录: {price_cache.get('valid_records', 0)}")
                 
                 # 财务缓存统计
-                if 'financial_cache' in cache_stats:
-                    financial_cache = cache_stats['financial_cache']
-                    st.write("**财务缓存:**")
+                if 'financial_cache' in db_cache_stats:
+                    financial_cache = db_cache_stats['financial_cache']
+                    st.write("**数据库财务缓存:**")
                     st.write(f"- 总记录数: {financial_cache.get('total_records', 0)}")
                     st.write(f"- 股票数量: {financial_cache.get('unique_tickers', 0)}")
                     st.write(f"- 有效记录: {financial_cache.get('valid_records', 0)}")
                 
                 # 查询记录统计
-                if 'query_records' in cache_stats:
-                    query_records = cache_stats['query_records']
+                if 'query_records' in db_cache_stats:
+                    query_records = db_cache_stats['query_records']
                     st.write("**查询记录:**")
                     st.write(f"- 总查询数: {query_records.get('total_queries', 0)}")
                     st.write(f"- 查询天数: {query_records.get('query_days', 0)}")
+            else:
+                st.info("暂无数据库缓存统计数据")
 
 
 def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None):
@@ -626,4 +683,27 @@ def main():
 
 
 if __name__ == "__main__":
+    # 高级缓存管理功能（仅在调试模式下显示）
+    if show_cache_stats:
+        st.markdown("---")
+        st.subheader("🔧 高级缓存管理")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            if st.button("清空所有内存缓存", help="清空所有内存中的缓存数据"):
+                cache_instance.clear_all_cache()
+                st.success("所有内存缓存已清空")
+        
+        with col2:
+            clear_ticker = st.text_input("清除特定股票缓存", placeholder="输入股票代码")
+            if st.button("清除股票缓存") and clear_ticker:
+                cache_instance.clear_ticker_cache(clear_ticker)
+                st.success(f"已清除 {clear_ticker} 的所有缓存")
+        
+        with col3:
+            st.write("缓存状态监控")
+            # 实时显示缓存状态
+            if st.button("刷新状态"):
+                st.rerun()
+    
     main()

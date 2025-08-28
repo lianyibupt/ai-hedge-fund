@@ -26,13 +26,14 @@ _db_manager = get_database_manager()
 
 def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
     """Fetch price data with multi-level cache: memory -> SQLite -> iTick API."""
-    # 第一级：检查内存缓存
-    if cached_data := _cache.get_prices(ticker):
-        # Filter cached data by date range
-        filtered_data = [Price(**price) for price in cached_data if start_date <= price["time"] <= end_date]
-        if filtered_data:
-            print(f"📋 从内存缓存获取 {ticker} 价格数据: {len(filtered_data)} 条")
-            return filtered_data
+    # 第一级：检查内存缓存（新的按日期缓存机制）
+    if cached_data := _cache.get_prices(ticker, start_date, end_date):
+        # 转换为Price对象并进一步过滤日期范围
+        prices = [Price(**price) for price in cached_data]
+        filtered_prices = [p for p in prices if start_date <= p.time <= end_date]
+        if filtered_prices:
+            print(f"📋 从内存缓存获取 {ticker} 价格数据: {len(filtered_prices)} 条")
+            return filtered_prices
 
     # 第二级：检查SQLite缓存
     try:
@@ -81,14 +82,14 @@ def get_financial_metrics(
     limit: int = 10,
 ) -> list[FinancialMetrics]:
     """Fetch financial metrics with multi-level cache: memory -> SQLite -> iTick API."""
-    # 第一级：检查内存缓存
-    if cached_data := _cache.get_financial_metrics(ticker):
-        # Filter cached data by date and limit
-        filtered_data = [FinancialMetrics(**metric) for metric in cached_data if metric["report_period"] <= end_date]
-        filtered_data.sort(key=lambda x: x.report_period, reverse=True)
-        if filtered_data:
-            print(f"📋 从内存缓存获取 {ticker} 财务指标: {len(filtered_data)} 条")
-            return filtered_data[:limit]
+    # 第一级：检查内存缓存（新的按报告期缓存机制）
+    if cached_data := _cache.get_financial_metrics(ticker, end_date):
+        # 转换为FinancialMetrics对象并应用限制
+        metrics = [FinancialMetrics(**metric) for metric in cached_data]
+        limited_metrics = metrics[:limit]
+        if limited_metrics:
+            print(f"📋 从内存缓存获取 {ticker} 财务指标: {len(limited_metrics)} 条")
+            return limited_metrics
 
     # 第二级：检查SQLite缓存
     try:
