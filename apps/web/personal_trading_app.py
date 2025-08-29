@@ -13,7 +13,11 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 添加src目录到Python路径
-sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
+import os
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.join(current_dir, '..', '..')
+src_dir = os.path.join(project_root, 'src')
+sys.path.insert(0, src_dir)
 
 from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats, clear_ticker_cache
 from data.cache import get_cache

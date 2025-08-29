@@ -9,7 +9,10 @@ import os
 from datetime import datetime, timedelta
 
 # 添加src目录到Python路径
-sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.join(current_dir, '..', '..')
+src_dir = os.path.join(project_root, 'src')
+sys.path.insert(0, src_dir)
 
 from data.database import get_database_manager
 from tools.api import get_prices, get_financial_metrics, cleanup_cache, get_cache_stats
