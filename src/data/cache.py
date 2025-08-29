@@ -68,6 +68,24 @@ class Cache:
                 filtered_prices.append(price_data)
         
         return filtered_prices if filtered_prices else None
+    
+    def get_cached_dates(self, ticker: str) -> List[str]:
+        """获取特定股票已缓存的所有日期"""
+        ticker = ticker.upper()
+        
+        if ticker not in self._prices_cache:
+            return []
+        
+        cached_dates = []
+        ticker_cache = self._prices_cache[ticker]
+        
+        for date_key in ticker_cache.keys():
+            cache_key = f"{ticker}_{date_key}"
+            # 只返回新鲜的缓存日期
+            if self._is_cache_fresh(cache_key, max_age_hours=24):
+                cached_dates.append(date_key)
+        
+        return sorted(cached_dates)
 
     def set_prices(self, ticker: str, data: List[dict]):
         """按日期存储价格数据，每个日期单独缓存"""

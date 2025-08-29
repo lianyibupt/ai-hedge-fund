@@ -15,7 +15,7 @@ load_dotenv()
 # 添加src目录到Python路径
 sys.path.append('/Users/bytedance/Documents/code/ai-hedge-fund/src')
 
-from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats
+from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats, clear_ticker_cache
 from data.cache import get_cache
 from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
@@ -54,6 +54,23 @@ st.markdown("""
 # 主标题
 st.title("🎯 个性化交易分析系统")
 st.markdown("基于MACD + RSI + 布林带 + 成交量的技术分析")
+
+# 智能缓存提示
+with st.expander("💡 智能缓存策略说明", expanded=False):
+    st.markdown("""
+    本系统采用**智能增量缓存策略**，显著提升查询效率：
+    
+    🔹 **同日查询优化**: 相同股票在同一天的重复查询完全命中缓存，响应时间接近0
+    
+    🔹 **跨日智能更新**: 查询新日期范围时，系统会：
+       - 分析已有缓存数据
+       - 只请求缺失的日期范围
+       - 将新旧数据智能合并
+    
+    🔹 **缓存命中率显示**: 查询结果会显示缓存命中率，帮助您了解系统效率
+    
+    🔹 **多级缓存架构**: 内存缓存 → SQLite缓存 → iTick API，确保最佳性能
+    """)
 
 # 侧边栏参数设置
 with st.sidebar:
@@ -100,7 +117,7 @@ with st.sidebar:
     # 数据库管理
     st.subheader("🗄️ 数据管理")
     
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         if st.button("清理过期缓存", help="清除过期的API缓存数据"):
@@ -113,6 +130,19 @@ with st.sidebar:
     with col2:
         if st.button("刷新缓存统计", help="重新计算缓存统计数据"):
             st.rerun()
+    
+    with col3:
+        if st.button("🔄 强制刷新数据", help="清除当前股票的所有缓存，强制从 API 获取最新数据"):
+            # 获取当前输入的股票代码
+            current_tickers = [ticker.strip().upper() for ticker in tickers_input.split(",") if ticker.strip()]
+            if current_tickers:
+                total_cleared = 0
+                for ticker in current_tickers:
+                    cleared_count = clear_ticker_cache(ticker)
+                    total_cleared += cleared_count
+                st.success(f"🔄 已清除 {', '.join(current_tickers)} 的所有缓存（{total_cleared} 条记录），下次分析将获取最新数据")
+            else:
+                st.warning("请先输入股票代码")
     
     # 缓存统计信息
     if show_cache_stats:

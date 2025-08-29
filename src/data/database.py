@@ -307,6 +307,27 @@ class DatabaseManager:
                 for row in rows
             ]
     
+    def get_cached_dates(self, ticker: str) -> List[str]:
+        """
+        获取特定股票已缓存的所有日期
+        
+        Args:
+            ticker: 股票代码
+            
+        Returns:
+            已缓存日期列表
+        """
+        with self.get_connection() as conn:
+            cursor = conn.execute("""
+                SELECT DISTINCT date
+                FROM price_cache 
+                WHERE ticker = ? AND expires_at > CURRENT_TIMESTAMP
+                ORDER BY date
+            """, (ticker.upper(),))
+            
+            rows = cursor.fetchall()
+            return [row['date'] for row in rows]
+    
     def cache_financial_data(
         self, 
         ticker: str, 
@@ -501,6 +522,30 @@ class DatabaseManager:
             
             if price_deleted > 0 or financial_deleted > 0:
                 print(f"🧹 清理过期缓存: 价格数据 {price_deleted} 条, 财务数据 {financial_deleted} 条")
+    
+    def clear_ticker_cache(self, ticker: str):
+        """清除特定股票的所有缓存数据"""
+        with self.get_connection() as conn:
+            # 清除价格缓存
+            cursor = conn.execute("""
+                DELETE FROM price_cache 
+                WHERE ticker = ?
+            """, (ticker.upper(),))
+            price_deleted = cursor.rowcount
+            
+            # 清除财务数据缓存
+            cursor = conn.execute("""
+                DELETE FROM financial_cache 
+                WHERE ticker = ?
+            """, (ticker.upper(),))
+            financial_deleted = cursor.rowcount
+            
+            conn.commit()
+            
+            if price_deleted > 0 or financial_deleted > 0:
+                print(f"🧹 清除 {ticker} 缓存: 价格数据 {price_deleted} 条, 财务数据 {financial_deleted} 条")
+            
+            return price_deleted + financial_deleted
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""

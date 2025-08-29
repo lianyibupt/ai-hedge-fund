@@ -25,54 +25,163 @@ _db_manager = get_database_manager()
 
 
 def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
-    """Fetch price data with multi-level cache: memory -> SQLite -> iTick API."""
-    # 第一级：检查内存缓存（新的按日期缓存机制）
-    if cached_data := _cache.get_prices(ticker, start_date, end_date):
-        # 转换为Price对象并进一步过滤日期范围
-        prices = [Price(**price) for price in cached_data]
-        filtered_prices = [p for p in prices if start_date <= p.time <= end_date]
-        if filtered_prices:
-            print(f"📋 从内存缓存获取 {ticker} 价格数据: {len(filtered_prices)} 条")
-            return filtered_prices
+    """Fetch price data with intelligent cache: analyze existing cache and request only missing dates."""
+    return _get_prices_intelligent_cache(ticker, start_date, end_date)
 
-    # 第二级：检查SQLite缓存
+
+def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str) -> list[Price]:
+    """
+    智能缓存策略：分析已有缓存数据，只请求缺失的日期范围
+    
+    缓存策略说明：
+    1. 首先检查内存和数据库缓存，找出已有的日期
+    2. 计算缺失的日期范围
+    3. 只对缺失的日期范围请求API
+    4. 将新获取的数据与缓存数据合并
+    """
+    from datetime import datetime, timedelta
+    import pandas as pd
+    
+    # 1. 收集所有已有的缓存数据
+    all_cached_prices = []
+    cached_dates = set()
+    
+    # 检查内存缓存
+    if cached_data := _cache.get_prices(ticker, start_date, end_date):
+        cached_prices = [Price(**price) for price in cached_data]
+        for price in cached_prices:
+            if start_date <= price.time <= end_date:
+                all_cached_prices.append(price)
+                cached_dates.add(price.time)
+        if cached_prices:
+            print(f"📋 内存缓存命中 {ticker}: {len(cached_prices)} 条数据")
+    
+    # 检查SQLite缓存
     try:
-        cached_price_data = _db_manager.get_cached_price_data(ticker, start_date, end_date)
-        if cached_price_data:
-            print(f"💾 从SQLite缓存获取 {ticker} 价格数据: {len(cached_price_data)} 条")
-            # 转换为Price对象
-            prices = [Price(**price_data) for price_data in cached_price_data]
-            # 同时更新内存缓存
-            _cache.set_prices(ticker, [p.model_dump() for p in prices])
-            return prices
+        db_cached_data = _db_manager.get_cached_price_data(ticker, start_date, end_date)
+        if db_cached_data:
+            db_prices = [Price(**price_data) for price_data in db_cached_data]
+            for price in db_prices:
+                if price.time not in cached_dates and start_date <= price.time <= end_date:
+                    all_cached_prices.append(price)
+                    cached_dates.add(price.time)
+            if db_prices:
+                print(f"💾 SQLite缓存命中 {ticker}: {len(db_prices)} 条数据")
     except Exception as e:
         print(f"⚠️ SQLite缓存读取失败: {str(e)}")
-
-    # 第三级：从iTick API获取数据
-    print(f"🔄 从 iTick API 获取 {ticker} 的价格数据...")
-    try:
-        prices = _fetch_prices_from_itick(ticker, start_date, end_date)
-        
-        if not prices:
-            raise Exception(f"iTick API 返回空数据，股票代码: {ticker}")
-            
-        print(f"✅ 成功从 iTick API 获取到 {len(prices)} 条价格数据")
-        
-        # 存储到双级缓存
-        price_dicts = [p.model_dump() for p in prices]
-        _cache.set_prices(ticker, price_dicts)  # 内存缓存
-        
+    
+    # 2. 分析缺失的日期范围
+    missing_ranges = _calculate_missing_date_ranges(start_date, end_date, cached_dates)
+    
+    if not missing_ranges:
+        # 所有数据都已缓存
+        all_cached_prices.sort(key=lambda x: x.time)
+        print(f"✅ {ticker} 数据完全命中缓存: {len(all_cached_prices)} 条")
+        return all_cached_prices
+    
+    # 3. 对缺失的日期范围请求API
+    new_prices = []
+    for missing_start, missing_end in missing_ranges:
+        print(f"🔄 从 iTick API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end}")
         try:
+            range_prices = _fetch_prices_from_itick(ticker, missing_start, missing_end)
+            if range_prices:
+                new_prices.extend(range_prices)
+                print(f"✅ 成功获取 {len(range_prices)} 条新数据")
+        except Exception as e:
+            print(f"❌ 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
+            # 继续处理其他日期范围
+            continue
+    
+    # 4. 缓存新获取的数据
+    if new_prices:
+        try:
+            price_dicts = [p.model_dump() for p in new_prices]
+            _cache.set_prices(ticker, price_dicts)  # 内存缓存
             _db_manager.cache_price_data(ticker, price_dicts, cache_hours=24)  # SQLite缓存
-            print(f"💾 价格数据已缓存到SQLite数据库")
+            print(f"💾 新数据已缓存: {len(new_prices)} 条")
         except Exception as cache_error:
-            print(f"⚠️ SQLite缓存存储失败: {str(cache_error)}")
+            print(f"⚠️ 缓存新数据失败: {str(cache_error)}")
+    
+    # 5. 合并所有数据
+    all_prices = all_cached_prices + new_prices
+    all_prices.sort(key=lambda x: x.time)
+    
+    # 过滤到请求的日期范围
+    filtered_prices = [p for p in all_prices if start_date <= p.time <= end_date]
+    
+    if not filtered_prices:
+        raise Exception(f"无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据")
+    
+    cache_ratio = len(all_cached_prices) / len(filtered_prices) * 100 if filtered_prices else 0
+    print(f"📊 {ticker} 数据获取完成: 总计 {len(filtered_prices)} 条 (缓存命中率: {cache_ratio:.1f}%)")
+    
+    return filtered_prices
+
+
+def _calculate_missing_date_ranges(start_date: str, end_date: str, cached_dates: set) -> list[tuple[str, str]]:
+    """
+    计算缺失的日期范围
+    
+    Args:
+        start_date: 请求的开始日期
+        end_date: 请求的结束日期  
+        cached_dates: 已缓存的日期集合
         
-        return prices
+    Returns:
+        缺失日期范围的列表 [(start1, end1), (start2, end2), ...]
+    """
+    from datetime import datetime, timedelta
+    
+    start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+    end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+    
+    # 生成请求范围内的所有日期（只包括工作日）
+    all_dates = []
+    current_dt = start_dt
+    while current_dt <= end_dt:
+        # 只包括工作日（0-6代表周一到周日，0-4是工作日）
+        if current_dt.weekday() < 5:  # 周一到周五
+            all_dates.append(current_dt.strftime("%Y-%m-%d"))
+        current_dt += timedelta(days=1)
+    
+    # 找出缺失的日期
+    missing_dates = [date for date in all_dates if date not in cached_dates]
+    
+    if not missing_dates:
+        return []
+    
+    # 将连续的缺失日期合并为范围
+    ranges = []
+    range_start = missing_dates[0]
+    range_end = missing_dates[0]
+    
+    for i in range(1, len(missing_dates)):
+        current_date = missing_dates[i]
+        prev_date = missing_dates[i-1]
         
-    except Exception as e:
-        print(f"❌ iTick API 获取价格数据失败: {str(e)}")
-        raise Exception(f"无法从 iTick API 获取 {ticker} 的价格数据: {str(e)}")
+        # 检查是否连续（考虑工作日）
+        prev_dt = datetime.strptime(prev_date, "%Y-%m-%d")
+        current_dt = datetime.strptime(current_date, "%Y-%m-%d")
+        
+        # 计算中间的工作日数量
+        next_workday = prev_dt + timedelta(days=1)
+        while next_workday.weekday() >= 5:  # 跳过周末
+            next_workday += timedelta(days=1)
+        
+        if next_workday.strftime("%Y-%m-%d") == current_date:
+            # 连续的工作日
+            range_end = current_date
+        else:
+            # 不连续，结束当前范围，开始新范围
+            ranges.append((range_start, range_end))
+            range_start = current_date
+            range_end = current_date
+    
+    # 添加最后一个范围
+    ranges.append((range_start, range_end))
+    
+    return ranges
 
 
 def get_financial_metrics(
@@ -257,6 +366,18 @@ def cleanup_cache():
         _db_manager.cleanup_expired_cache()
     except Exception as e:
         print(f"⚠️ 缓存清理失败: {str(e)}")
+
+
+def clear_ticker_cache(ticker: str):
+    """清除特定股票的所有缓存数据"""
+    try:
+        # 清除内存缓存
+        _cache.clear_ticker_cache(ticker)
+        # 清除数据库缓存
+        return _db_manager.clear_ticker_cache(ticker)
+    except Exception as e:
+        print(f"⚠️ 清除 {ticker} 缓存失败: {str(e)}")
+        return 0
 
 
 def get_cache_stats() -> dict:
