@@ -1,8 +1,21 @@
 import gradio as gr
+import sys
+import os
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
-from main import run_hedge_fund, ANALYST_ORDER, LLM_ORDER, get_model_info
 import json
+
+# 添加必要的目录到Python路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.join(current_dir, '..', '..')
+src_dir = os.path.join(project_root, 'src')
+cli_dir = os.path.join(project_root, 'apps', 'cli')
+sys.path.insert(0, src_dir)
+sys.path.insert(0, cli_dir)
+
+from main import run_hedge_fund
+from utils.analysts import ANALYST_ORDER
+from llm.models import LLM_ORDER, get_model_info
 
 # 默认日期设置
 today = datetime.now().strftime("%Y-%m-%d")

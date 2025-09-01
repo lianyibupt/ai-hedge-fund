@@ -1,4 +1,11 @@
 import sys
+import os
+
+# 添加src目录到Python路径
+current_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.join(current_dir, '..', '..')
+src_dir = os.path.join(project_root, 'src')
+sys.path.insert(0, src_dir)
 
 from dotenv import load_dotenv
 from langchain_core.messages import HumanMessage

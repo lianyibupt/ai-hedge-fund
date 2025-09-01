@@ -32,7 +32,8 @@ def main():
     
     # 获取脚本所在目录
     script_dir = os.path.dirname(os.path.abspath(__file__))
-    app_path = os.path.join(script_dir, "src", "personal_trading_app.py")
+    project_root = os.path.join(script_dir, '..', '..')
+    app_path = os.path.join(project_root, "apps", "web", "personal_trading_app.py")
     
     if not os.path.exists(app_path):
         print(f"❌ 找不到应用文件: {app_path}")
