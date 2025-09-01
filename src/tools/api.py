@@ -2,6 +2,7 @@ import os
 import pandas as pd
 from typing import Optional
 from .itick_api import get_itick_api, date_to_timestamp
+import re
 
 from data.cache import get_cache
 from data.database import get_database_manager
@@ -24,12 +25,58 @@ _cache = get_cache()
 _db_manager = get_database_manager()
 
 
-def get_prices(ticker: str, start_date: str, end_date: str) -> list[Price]:
-    """Fetch price data with intelligent cache: analyze existing cache and request only missing dates."""
-    return _get_prices_intelligent_cache(ticker, start_date, end_date)
+def _detect_ticker_region(ticker: str) -> str:
+    """
+    根据股票代码检测市场区域
+    
+    Args:
+        ticker: 股票代码
+        
+    Returns:
+        市场区域代码 (us, hk, sh, sz, sg, jp)
+    """
+    ticker = ticker.strip().upper()
+    
+    # 港股：HK.开头或者纯数字（4-5位）
+    if ticker.startswith('HK.') or (ticker.isdigit() and len(ticker) in [4, 5]):
+        return 'hk'
+    
+    # A股：以数字开头且6位数字
+    if ticker.isdigit() and len(ticker) == 6:
+        # 上证：000001-199999, 600000-699999, 900000-999999
+        # 深证：000000-399999
+        first_digit = ticker[0]
+        if first_digit in ['6', '9']:
+            return 'sh'  # 上证
+        elif first_digit in ['0', '3']:
+            return 'sz'  # 深证
+    
+    # A股：.SH 或 .SZ 后缀
+    if ticker.endswith('.SH'):
+        return 'sh'
+    elif ticker.endswith('.SZ'):
+        return 'sz'
+    
+    # 新加坡股票：暂时按代码模式识别（待完善）
+    # 日本股票：暂时按代码模式识别（待完善）
+    
+    # 默认为美股
+    return 'us'
 
 
-def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str) -> list[Price]:
+def get_prices(ticker: str, start_date: str, end_date: str, region: str = None) -> list[Price]:
+    """Fetch price data with intelligent cache: analyze existing cache and request only missing dates.
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期 (YYYY-MM-DD)
+        end_date: 结束日期 (YYYY-MM-DD)
+        region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
+    """
+    return _get_prices_intelligent_cache(ticker, start_date, end_date, region)
+
+
+def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, region: str = None) -> list[Price]:
     """
     智能缓存策略：分析已有缓存数据，只请求缺失的日期范围
     
@@ -38,9 +85,39 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str) -
     2. 计算缺失的日期范围
     3. 只对缺失的日期范围请求API
     4. 将新获取的数据与缓存数据合并
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期 (YYYY-MM-DD)
+        end_date: 结束日期 (YYYY-MM-DD)
+        region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
     """
     from datetime import datetime, timedelta
     import pandas as pd
+    
+    # 如果没有提供region，则自动检测
+    if region is None:
+        region = _detect_ticker_region(ticker)
+    
+    # 日期验证：检查是否查询未来日期
+    try:
+        start_dt = datetime.strptime(start_date, "%Y-%m-%d")
+        end_dt = datetime.strptime(end_date, "%Y-%m-%d")
+        now = datetime.now()
+        
+        if end_dt > now:
+            # 如果结束日期在未来，调整为当前日期
+            adjusted_end_date = now.strftime("%Y-%m-%d")
+            print(f"⚠️ 结束日期 {end_date} 在未来，调整为 {adjusted_end_date}")
+            end_date = adjusted_end_date
+        
+        if start_dt > now:
+            print(f"⚠️ 警告：开始日期 {start_date} 在未来，无法获取数据")
+            raise Exception(f"无法获取未来日期的数据: {start_date}")
+            
+    except ValueError as e:
+        print(f"⚠️ 日期格式错误: {str(e)}")
+        raise Exception(f"日期格式必须为 YYYY-MM-DD: {start_date}, {end_date}")
     
     # 1. 收集所有已有的缓存数据
     all_cached_prices = []
@@ -82,14 +159,15 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str) -
     # 3. 对缺失的日期范围请求API
     new_prices = []
     for missing_start, missing_end in missing_ranges:
-        print(f"🔄 从 iTick API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end}")
+        print(f"🔄 从 iTick API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
         try:
-            range_prices = _fetch_prices_from_itick(ticker, missing_start, missing_end)
+            range_prices = _fetch_prices_from_itick(ticker, missing_start, missing_end, region)
             if range_prices:
                 new_prices.extend(range_prices)
                 print(f"✅ 成功获取 {len(range_prices)} 条新数据")
         except Exception as e:
             print(f"❌ 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
+            print(f"❌ 详细错误: {type(e).__name__}: {str(e)}")
             # 继续处理其他日期范围
             continue
     
@@ -111,7 +189,17 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str) -
     filtered_prices = [p for p in all_prices if start_date <= p.time <= end_date]
     
     if not filtered_prices:
-        raise Exception(f"无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据")
+        # 提供更详细的错误信息
+        error_details = []
+        error_details.append(f"股票代码: {ticker}")
+        error_details.append(f"市场区域: {region}")
+        error_details.append(f"查询日期范围: {start_date} 到 {end_date}")
+        error_details.append(f"缓存数据: {len(all_cached_prices)} 条")
+        error_details.append(f"新获取数据: {len(new_prices)} 条")
+        error_details.append(f"缺失日期范围: {len(missing_ranges)} 个")
+        
+        error_msg = f"无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据\n" + "\n".join([f"  - {detail}" for detail in error_details])
+        raise Exception(error_msg)
     
     cache_ratio = len(all_cached_prices) / len(filtered_prices) * 100 if filtered_prices else 0
     print(f"📊 {ticker} 数据获取完成: 总计 {len(filtered_prices)} 条 (缓存命中率: {cache_ratio:.1f}%)")
@@ -189,8 +277,20 @@ def get_financial_metrics(
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
+    region: str = None,
 ) -> list[FinancialMetrics]:
-    """Fetch financial metrics with multi-level cache: memory -> SQLite -> iTick API."""
+    """Fetch financial metrics with multi-level cache: memory -> SQLite -> iTick API.
+    
+    Args:
+        ticker: 股票代码
+        end_date: 结束日期
+        period: 报告期间
+        limit: 数据限制
+        region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
+    """
+    # 如果没有提供region，则自动检测
+    if region is None:
+        region = _detect_ticker_region(ticker)
     # 第一级：检查内存缓存（新的按报告期缓存机制）
     if cached_data := _cache.get_financial_metrics(ticker, end_date):
         # 转换为FinancialMetrics对象并应用限制
@@ -218,7 +318,7 @@ def get_financial_metrics(
     # 第三级：从iTick API获取数据
     print(f"🔄 从 iTick API 获取 {ticker} 的财务指标...")
     try:
-        metrics = _fetch_financial_metrics_from_itick(ticker, end_date, period, limit)
+        metrics = _fetch_financial_metrics_from_itick(ticker, end_date, period, limit, region)
         
         if not metrics:
             raise Exception(f"iTick API 返回空财务数据，股票代码: {ticker}")
@@ -400,8 +500,15 @@ def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
 # Data Source Implementations
 # =============================================================================
 
-def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str) -> list[Price]:
-    """从iTick API获取价格数据"""
+def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从iTick API获取价格数据
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
     itick_api = get_itick_api()
     
     # 转换日期为时间戳
@@ -414,7 +521,7 @@ def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str) -> lis
         period="1d",
         start_time=str(start_timestamp),
         end_time=str(end_timestamp),
-        region="us"
+        region=region
     )
     
     # 转换为Price对象
@@ -432,12 +539,21 @@ def _fetch_financial_metrics_from_itick(
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
+    region: str = 'us',
 ) -> list[FinancialMetrics]:
-    """从iTick API获取财务指标"""
+    """从iTick API获取财务指标
+    
+    Args:
+        ticker: 股票代码
+        end_date: 结束日期
+        period: 报告期间
+        limit: 数据限制
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
     itick_api = get_itick_api()
     
     # 获取财务数据
-    financial_data = itick_api.get_financial_data(ticker, region="us")
+    financial_data = itick_api.get_financial_data(ticker, region=region)
     
     # 转换为FinancialMetrics对象
     return itick_api.convert_to_financial_metrics(financial_data, ticker)

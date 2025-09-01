@@ -20,6 +20,7 @@ from data.cache import get_cache
 from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
 import uuid
+import re
 
 # 页面配置
 st.set_page_config(
@@ -35,6 +36,106 @@ cache_instance = get_cache()
 # 生成会话ID
 if 'session_id' not in st.session_state:
     st.session_state.session_id = str(uuid.uuid4())
+
+
+def detect_market_region(ticker: str) -> str:
+    """
+    根据股票代码检测市场区域
+    
+    Args:
+        ticker: 股票代码
+        
+    Returns:
+        市场区域代码 (us, hk, sh, sz, sg, jp)
+    """
+    ticker = ticker.strip().upper()
+    
+    # 港股：HK.开头或者纯数字（4-5位）
+    if ticker.startswith('HK.') or (ticker.isdigit() and len(ticker) in [4, 5]):
+        return 'hk'
+    
+    # A股：以数字开头且6位数字
+    if ticker.isdigit() and len(ticker) == 6:
+        # 上证：000001-199999, 600000-699999, 900000-999999
+        # 深证：000000-399999
+        first_digit = ticker[0]
+        if first_digit in ['6', '9']:
+            return 'sh'  # 上证
+        elif first_digit in ['0', '3']:
+            return 'sz'  # 深证
+    
+    # A股：.SH 或 .SZ 后缀
+    if ticker.endswith('.SH'):
+        return 'sh'
+    elif ticker.endswith('.SZ'):
+        return 'sz'
+    
+    # 新加坡股票：暂时按代码模式识别（待完善）
+    # 日本股票：暂时按代码模式识别（待完善）
+    
+    # 默认为美股
+    return 'us'
+
+
+def format_ticker_display(ticker: str, region: str) -> str:
+    """
+    格式化股票代码显示
+    
+    Args:
+        ticker: 股票代码
+        region: 市场区域
+        
+    Returns:
+        格式化后的显示字符串
+    """
+    region_names = {
+        'us': '🇺🇸 美股',
+        'hk': '🇭🇰 港股', 
+        'sh': '🇨🇳 上证',
+        'sz': '🇨🇳 深证',
+        'sg': '🇸🇬 新加坡',
+        'jp': '🇯🇵 日本'
+    }
+    
+    return f"{ticker} ({region_names.get(region, '🌍 其他')})"
+
+
+def validate_ticker_format(ticker: str) -> tuple[bool, str]:
+    """
+    验证股票代码格式
+    
+    Args:
+        ticker: 股票代码
+        
+    Returns:
+        (是否有效, 错误信息)
+    """
+    ticker = ticker.strip().upper()
+    
+    if not ticker:
+        return False, "股票代码不能为空"
+    
+    # 美股：字母组合，1-5位
+    if re.match(r'^[A-Z]{1,5}$', ticker):
+        return True, ""
+    
+    # 港股：HK.开头 + 5位数字
+    if re.match(r'^HK\.[0-9]{5}$', ticker):
+        return True, ""
+    
+    # 港股：纯4-5位数字
+    if re.match(r'^[0-9]{4,5}$', ticker):
+        return True, ""
+    
+    # A股：6位数字
+    if re.match(r'^[0-9]{6}$', ticker):
+        return True, ""
+    
+    # A股：6位数字.SH/SZ
+    if re.match(r'^[0-9]{6}\.(SH|SZ)$', ticker):
+        return True, ""
+    
+    return False, f"不支持的股票代码格式: {ticker}"
 
 # CSS样式
 st.markdown("""
@@ -77,10 +178,36 @@ with st.sidebar:
     st.header("📊 分析参数")
     
     # 股票代码输入
+    st.subheader("📊 股票选择")
+    
+    # 市场支持信息
+    with st.expander("🌍 支持的市场和格式", expanded=False):
+        st.markdown("""
+        **支持的市场:**
+        - 🇺🇸 **美股** (US): AAPL, MSFT, GOOGL, TSLA
+        - 🇭🇰 **港股** (HK): 00700, 09988, HK.00700, HK.09988
+        - 🇨🇳 **上证** (SH): 600519, 000001.SH, 600036.SH
+        - 🇨🇳 **深证** (SZ): 000001, 000002.SZ, 300750.SZ
+        - 🇸🇬 **新加坡** (SG): 支持，待完善格式检测
+        - 🇯🇵 **日本** (JP): 支持，待完善格式检测
+        
+        **格式示例:**
+        - 美股: `AAPL,MSFT,NVDA`
+        - 港股: `00700,09988,03690` 或 `HK.00700,HK.09988`
+        - 上证: `600519,600036` 或 `600519.SH,600036.SH`
+        - 深证: `000001,000002,300750` 或 `000001.SZ,000002.SZ`
+        - 混合: `AAPL,00700,600519,000001`
+        
+        **注意事项:**
+        - 系统会自动检测股票代码的市场区域
+        - 不同市场的数据来源和更新频率可能不同
+        - 部分市场的财务数据可能有限
+        """)
+    
     tickers_input = st.text_input(
         "股票代码 (逗号分隔)",
-        value="ZETA,RXRX,TUYA,BEKE,SBET",
-        help="输入要分析的股票代码，多个代码用逗号分隔。支持美股、港股等"
+        value="ZETA,RXRX,BEKE,CRCL,CRWV",
+        help="输入要分析的股票代码，多个代码用逗号分隔。支持美股、港股、A股等多个市场"
     )
     
     # 日期范围选择
@@ -220,8 +347,18 @@ with st.sidebar:
 
 def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None):
     """
-    简化版股票分析 - 为Streamlit优化，支持数据库记录
+    简化版股票分析 - 为Streamlit优化，支持数据库记录，支持多市场
     """
+    # 检测股票代码市场
+    region = detect_market_region(ticker)
+    ticker_display = format_ticker_display(ticker, region)
+    
+    # 验证股票代码格式
+    is_valid, error_msg = validate_ticker_format(ticker)
+    if not is_valid:
+        st.error(f"⚠️ {error_msg}")
+        return None
+    
     # 获取扩展的历史数据用于技术分析
     extended_start = (datetime.strptime(start_date, "%Y-%m-%d") - timedelta(days=90)).strftime("%Y-%m-%d")
     
@@ -230,19 +367,26 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
     status_text = st.empty()
     
     try:
-        status_text.text(f"⏳ 获取 {ticker} 价格数据...")
+        status_text.text(f"⏳ 获取 {ticker_display} 价格数据...")
         progress_bar.progress(20)
         
-        prices = get_prices(ticker, extended_start, end_date)
+        # 传递市场区域参数给API
+        prices = get_prices_with_region(ticker, extended_start, end_date, region)
         
         if not prices:
+            error_msg = f"⚠️ 无法获取 {ticker_display} 的价格数据。可能的原因：\n"
+            error_msg += f"• 股票代码 {ticker} 可能不存在或已退市\n"
+            error_msg += f"• 查询日期范围可能包含未来日期\n"
+            error_msg += f"• 市场 {region.upper()} 可能暂时不可用\n"
+            error_msg += f"• 网络连接或API服务问题"
+            st.error(error_msg)
             return None
         
         # 转换为DataFrame
         prices_df = prices_to_df(prices)
         
         if len(prices_df) < 30:
-            st.error(f"❌ {ticker}数据不足（仅{len(prices_df)}天），需要至少30天数据")
+            st.error(f"❌ {ticker_display}数据不足（仅{len(prices_df)}天），需要至少30天数据")
             return None
         
         progress_bar.progress(50)
@@ -258,7 +402,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         pe_ratio = None
         pb_ratio = None
         try:
-            financial_metrics = get_financial_metrics(ticker, end_date)
+            financial_metrics = get_financial_metrics_with_region(ticker, end_date, region)
             if financial_metrics:
                 pe_ratio = financial_metrics[0].price_to_earnings_ratio
                 pb_ratio = financial_metrics[0].price_to_book_ratio
@@ -271,6 +415,8 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         # 组装结果
         result = {
             'ticker': ticker,
+            'ticker_display': ticker_display,
+            'region': region,
             'current_price': prices_df['close'].iloc[-1],
             'analysis': analysis_result,
             'financial_metrics': {
@@ -298,8 +444,22 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
     except Exception as e:
         progress_bar.empty()
         status_text.empty()
-        st.error(f"❌ 分析{ticker}时出错: {str(e)}")
+        st.error(f"❌ 分析{ticker_display}时出错: {str(e)}")
         return None
+
+
+def get_prices_with_region(ticker: str, start_date: str, end_date: str, region: str):
+    """
+    根据市场区域获取价格数据
+    """
+    return get_prices(ticker, start_date, end_date, region)
+
+
+def get_financial_metrics_with_region(ticker: str, end_date: str, region: str):
+    """
+    根据市场区域获取财务指标
+    """
+    return get_financial_metrics(ticker, end_date, region=region)
 
 
 def generate_trading_recommendation(analysis_result):
@@ -547,6 +707,63 @@ def main():
     # 解析股票代码
     if tickers_input:
         tickers = [ticker.strip().upper() for ticker in tickers_input.split(",")]
+        
+        # 验证所有股票代码
+        invalid_tickers = []
+        valid_tickers = []
+        market_info = {}
+        
+        for ticker in tickers:
+            is_valid, error_msg = validate_ticker_format(ticker)
+            if is_valid:
+                region = detect_market_region(ticker)
+                valid_tickers.append(ticker)
+                market_info[ticker] = {
+                    'region': region,
+                    'display': format_ticker_display(ticker, region)
+                }
+            else:
+                invalid_tickers.append((ticker, error_msg))
+        
+        # 显示验证结果
+        if valid_tickers:
+            st.success(f"✅ 有效股票代码: {len(valid_tickers)} 个")
+            
+            # 按市场分组显示
+            markets = {'us': [], 'hk': [], 'sh': [], 'sz': [], 'sg': [], 'jp': []}
+            for ticker in valid_tickers:
+                region = market_info[ticker]['region']
+                markets[region].append(ticker)
+            
+            # 只显示有股票的市场
+            active_markets = [(k, v) for k, v in markets.items() if v]
+            market_names = {
+                'us': '🇺🇸 美股', 
+                'hk': '🇭🇰 港股', 
+                'sh': '🇨🇳 上证',
+                'sz': '🇨🇳 深证',
+                'sg': '🇸🇬 新加坡',
+                'jp': '🇯🇵 日本'
+            }
+            
+            if len(active_markets) <= 3:
+                cols = st.columns(len(active_markets))
+                for i, (market, stocks) in enumerate(active_markets):
+                    with cols[i]:
+                        st.write(f"**{market_names[market]}**")
+                        for stock in stocks:
+                            st.write(f"• {stock}")
+            else:
+                # 如果超过3个市场，使用列表显示
+                for market, stocks in active_markets:
+                    st.write(f"**{market_names[market]}**: {', '.join(stocks)}")
+        
+        if invalid_tickers:
+            st.error("❌ 无效的股票代码:")
+            for ticker, error in invalid_tickers:
+                st.write(f"• {ticker}: {error}")
+            
+        tickers = valid_tickers  # 只使用有效的股票代码
     else:
         st.error("请输入股票代码")
         return
@@ -598,7 +815,9 @@ def main():
         # 分析每只股票
         for i, ticker in enumerate(tickers):
             with st.container():
-                st.header(f"📊 {ticker} 分析结果")
+                # 使用市场信息显示标题
+                ticker_display = market_info.get(ticker, {}).get('display', ticker)
+                st.header(f"📊 {ticker_display} 分析结果")
                 
                 # 执行分析
                 result = analyze_stock_simple(
