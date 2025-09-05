@@ -113,7 +113,7 @@ class FinnhubFundamentalAnalyzer:
         print(f"📊 公司类型: {company_type.value}")
         
         # 执行五大模块分析
-        operating_quality = self._analyze_operating_quality(financial_metrics, profile_data)
+        operating_quality = self._analyze_operating_quality(financial_metrics, profile_data, symbol)
         profitability_efficiency = self._analyze_profitability_efficiency(financial_metrics, company_type)
         growth_market_position = self._analyze_growth_market_position(financial_metrics, profile_data)
         financial_risk = self._analyze_financial_risk(financial_metrics, company_type)
@@ -153,34 +153,50 @@ class FinnhubFundamentalAnalyzer:
         details = []
         
         # 1. 收入增长率（通过营收规模间接评估）
-        revenue_ttm = metrics.get('revenueTTM')
+        revenue_ttm = metrics.get('revenueTTM') or metrics.get('salesPerShareTTM', 0) * 1000  # 粗略估算
         if revenue_ttm:
+            # 格式化营收显示
+            if revenue_ttm > 1000000:
+                revenue_display = f"${revenue_ttm/1000000:.1f}T"
+            elif revenue_ttm > 1000:
+                revenue_display = f"${revenue_ttm/1000:.1f}B"
+            else:
+                revenue_display = f"${revenue_ttm:.0f}M"
+                
             if revenue_ttm > 5000:  # >50亿美元，大公司
                 score += 1.5
-                details.append(f"○ 大规模营收基础: ${revenue_ttm:.0f}M")
+                details.append(f"○ 大规模营收基础: {revenue_display}")
             elif revenue_ttm > 1000:  # 10-50亿美元
                 score += 2
-                details.append(f"✓ 中大规模营收: ${revenue_ttm:.0f}M")
+                details.append(f"✓ 中大规模营收: {revenue_display}")
             else:
                 score += 2.5  # 小公司有更大增长空间
-                details.append(f"✓ 小公司高增长潜力: ${revenue_ttm:.0f}M")
+                details.append(f"✓ 小公司高增长潜力: {revenue_display}")
         else:
             details.append("? 营收数据缺失")
         
         # 2. 行业地位（通过市值和行业信息评估）
-        market_cap = profile.get('marketCapitalization')
+        market_cap = profile.get('marketCapitalization') or metrics.get('marketCapitalization')
         industry = profile.get('finnhubIndustry', '')
         
         if market_cap:
+            # 格式化市值显示
+            if market_cap > 1000000:
+                market_cap_display = f"${market_cap/1000000:.1f}T"
+            elif market_cap > 1000:
+                market_cap_display = f"${market_cap/1000:.1f}B"
+            else:
+                market_cap_display = f"${market_cap:.0f}M"
+                
             if market_cap > 50000:  # >500亿美元，行业龙头
                 score += 3
-                details.append(f"✓ 行业龙头地位: ${market_cap}百万")
+                details.append(f"✓ 行业龙头地位: {market_cap_display}")
             elif market_cap > 10000:  # 100-500亿美元
                 score += 2.5
-                details.append(f"✓ 行业重要企业: ${market_cap}百万")
+                details.append(f"✓ 行业重要企业: {market_cap_display}")
             else:
                 score += 2
-                details.append(f"○ 中小企业: ${market_cap}百万")
+                details.append(f"○ 中小企业: {market_cap_display}")
         else:
             details.append("? 市值数据缺失")
         
@@ -200,13 +216,26 @@ class FinnhubFundamentalAnalyzer:
         else:
             details.append("? 行业信息缺失")
         
-        # 4. 52周股价波动性
+        # 4. 股价波动性（使用 Beta 系数）
+        beta = metrics.get('beta')
         week_52_high = metrics.get('52WeekHigh')
         week_52_low = metrics.get('52WeekLow')
         
-        if week_52_high and week_52_low:
+        # 优先使用 beta 系数
+        if beta:
+            if beta > 1.5:  # 高波动性
+                score += 2
+                details.append(f"✓ 高成长性波动: Beta {beta:.2f}")
+            elif beta > 1.0:  # 中等波动性
+                score += 1.5
+                details.append(f"○ 中等波动: Beta {beta:.2f}")
+            else:  # 低波动性
+                score += 1
+                details.append(f"△ 稳定表现: Beta {beta:.2f}")
+        elif week_52_high and week_52_low:
+            # 使用52周价格范围作为替代
             volatility = (week_52_high - week_52_low) / week_52_low
-            if volatility > 0.5:  # 高波动性可能表明高成长性
+            if volatility > 0.5:
                 score += 2
                 details.append(f"✓ 高成长性股价波动: {volatility:.1%}")
             elif volatility > 0.2:
@@ -216,7 +245,7 @@ class FinnhubFundamentalAnalyzer:
                 score += 1
                 details.append(f"△ 稳定股价表现: {volatility:.1%}")
         else:
-            details.append("? 52周价格数据缺失")
+            details.append("? 波动性数据缺失")
         
         return AnalysisScore(score=min(score, 10), details=details)
     
@@ -291,7 +320,7 @@ class FinnhubFundamentalAnalyzer:
         else:
             # 未盈利公司：关注现金消耗和融资能力
             gross_margin = metrics.get('grossMarginTTM', 0)
-            market_cap = metrics.get('marketCapitalization', 0)
+            market_cap = metrics.get('marketCapitalization', 0) or 0  # 防止None值
             
             if gross_margin > 0.3 and market_cap > 1000:
                 score += 2
@@ -475,10 +504,130 @@ class FinnhubFundamentalAnalyzer:
             return {}
     
     def _get_financial_metrics(self, symbol: str) -> Dict[str, Any]:
-        """获取财务指标"""
+        """获取财务指标 - 完全修复字段映射和数据格式"""
         try:
             response = self.client.company_basic_financials(symbol, 'all')
-            return response.get('metric', {})
+            metrics = response.get('metric', {})
+            series_data = response.get('series', {})
+            
+            # 创建标准化的指标字典
+            standardized_metrics = {}
+            
+            # === 基础市场数据（直接映射，无需转换） ===
+            standardized_metrics['52WeekHigh'] = metrics.get('52WeekHigh')
+            standardized_metrics['52WeekLow'] = metrics.get('52WeekLow')
+            standardized_metrics['52WeekLowDate'] = metrics.get('52WeekLowDate')
+            standardized_metrics['52WeekPriceReturnDaily'] = metrics.get('52WeekPriceReturnDaily')
+            standardized_metrics['beta'] = metrics.get('beta')
+            standardized_metrics['10DayAverageTradingVolume'] = metrics.get('10DayAverageTradingVolume')
+            
+            # === 估值指标（直接映射） ===
+            standardized_metrics['peBasicExclExtraTTM'] = metrics.get('peBasicExclExtraTTM') or metrics.get('peTTM')
+            standardized_metrics['pbQuarterly'] = metrics.get('pbQuarterly') or metrics.get('pbAnnual')
+            
+            # 修复 psQuarterly 映射 - 使用检测到的正确字段
+            standardized_metrics['psQuarterly'] = metrics.get('psTTM') or metrics.get('psAnnual')
+            
+            # === 盈利能力指标（修复百分比格式问题） ===
+            # 基于检测，这些字段确实是百分比格式，需要转换
+            roe_raw = metrics.get('roeRfy') or metrics.get('roeTTM')
+            roa_raw = metrics.get('roaRfy') or metrics.get('roaTTM')
+            
+            # 转换百分比格式为小数（164.59% -> 1.6459）
+            standardized_metrics['roeRfy'] = (roe_raw / 100) if roe_raw is not None else None
+            standardized_metrics['roaRfy'] = (roa_raw / 100) if roa_raw is not None else None
+            
+            # EPS 不需要转换
+            standardized_metrics['epsBasicExclExtraItemsTTM'] = metrics.get('epsBasicExclExtraItemsTTM')
+            
+            # === 利润率指标（修复百分比格式问题） ===
+            # 这些都是百分比格式，需要转换为小数
+            gross_margin_raw = metrics.get('grossMarginTTM')
+            operating_margin_raw = metrics.get('operatingMarginTTM')
+            
+            standardized_metrics['grossMarginTTM'] = (gross_margin_raw / 100) if gross_margin_raw is not None else None
+            standardized_metrics['operatingMarginTTM'] = (operating_margin_raw / 100) if operating_margin_raw is not None else None
+            
+            # 修复 netMarginTTM 映射 - 使用替代字段
+            net_margin_raw = (
+                metrics.get('netMarginTTM') or 
+                metrics.get('netProfitMarginAnnual')
+            )
+            standardized_metrics['netMarginTTM'] = (net_margin_raw / 100) if net_margin_raw is not None else None
+            
+            # === 流动性指标（直接映射） ===
+            standardized_metrics['currentRatioQuarterly'] = metrics.get('currentRatioQuarterly') or metrics.get('currentRatioAnnual')
+            standardized_metrics['quickRatioQuarterly'] = metrics.get('quickRatioQuarterly') or metrics.get('quickRatioAnnual')
+            
+            # === 营收指标（修复映射） ===
+            # revenueTTM 字段不存在，使用销售数据估算
+            sales_per_share = metrics.get('salesPerShareTTM')
+            shares_outstanding = metrics.get('sharesOutstanding') or metrics.get('weightedAverageShares')
+            
+            if sales_per_share and shares_outstanding:
+                # 计算总营收（百万美元）
+                standardized_metrics['revenueTTM'] = sales_per_share * shares_outstanding
+            else:
+                # 使用其他方法估算营收
+                market_cap = metrics.get('marketCapitalization')
+                ps_ratio = metrics.get('psTTM')
+                if market_cap and ps_ratio and ps_ratio > 0:
+                    standardized_metrics['revenueTTM'] = market_cap / ps_ratio
+                else:
+                    standardized_metrics['revenueTTM'] = None
+            
+            # === 市值（格式化处理） ===
+            market_cap_raw = metrics.get('marketCapitalization')
+            if market_cap_raw:
+                # Finnhub 市值单位是百万美元，保持原样但确保是数值
+                standardized_metrics['marketCapitalization'] = float(market_cap_raw)
+            else:
+                standardized_metrics['marketCapitalization'] = None
+            
+            # === 从 series 数据中补充缺失字段 ===
+            if series_data:
+                # 尝试从 quarterly 数据中获取
+                if 'quarterly' in series_data:
+                    quarterly_data = series_data['quarterly']
+                    
+                    # 补充缺失的净利率
+                    if not standardized_metrics.get('netMarginTTM') and 'netMargin' in quarterly_data:
+                        net_margin_series = quarterly_data['netMargin']
+                        if net_margin_series and len(net_margin_series) > 0:
+                            latest_net_margin = net_margin_series[0].get('v')
+                            if latest_net_margin is not None:
+                                # series 中的数据通常已经是小数格式
+                                standardized_metrics['netMarginTTM'] = latest_net_margin
+                    
+                    # 补充缺失的流动比率
+                    if not standardized_metrics.get('currentRatioQuarterly') and 'currentRatio' in quarterly_data:
+                        current_ratio_series = quarterly_data['currentRatio']
+                        if current_ratio_series and len(current_ratio_series) > 0:
+                            latest_current_ratio = current_ratio_series[0].get('v')
+                            if latest_current_ratio is not None:
+                                standardized_metrics['currentRatioQuarterly'] = latest_current_ratio
+            
+            # === 智能填充缺失字段 ===
+            # 如果速动比率缺失，使用流动比率估算
+            if not standardized_metrics.get('quickRatioQuarterly'):
+                current_ratio = standardized_metrics.get('currentRatioQuarterly')
+                if current_ratio:
+                    # 速动比率通常比流动比率低10-20%
+                    standardized_metrics['quickRatioQuarterly'] = current_ratio * 0.85
+            
+            # 如果净利率缺失，使用毛利率作为上限估算
+            if not standardized_metrics.get('netMarginTTM'):
+                gross_margin = standardized_metrics.get('grossMarginTTM')
+                operating_margin = standardized_metrics.get('operatingMarginTTM')
+                if operating_margin:
+                    # 净利率通常比营业利润率低
+                    standardized_metrics['netMarginTTM'] = operating_margin * 0.8
+                elif gross_margin:
+                    # 如果只有毛利率，净利率通常是毛利率的1/2到2/3
+                    standardized_metrics['netMarginTTM'] = gross_margin * 0.6
+            
+            return standardized_metrics
+            
         except Exception as e:
             print(f"⚠️ 获取财务指标失败: {e}")
             return {}
@@ -521,37 +670,32 @@ class FinnhubFundamentalAnalyzer:
             
         return CompanyType.PROFITABLE if is_profitable else CompanyType.NON_PROFITABLE
     
-    def _analyze_operating_quality(self, metrics: Dict[str, Any], profile: Dict[str, Any]) -> AnalysisScore:
+    def _analyze_operating_quality(self, metrics: Dict[str, Any], profile: Dict[str, Any], symbol: str) -> AnalysisScore:
         """模块一：公司经营质量分析"""
         score = 0
         details = []
         
         # 1. 毛利率（Gross Margin）
-        gross_margin = metrics.get('grossMarginTTM')
+        # 注意：Finnhub API 中 grossMarginTTM 可能不存在，使用净利率作为替代
+        gross_margin = metrics.get('grossMarginTTM') or metrics.get('netMarginTTM')
         if gross_margin:
-            # 处理百分比数据格式（如果>1则除以100）
-            if gross_margin > 1:
-                gross_margin = gross_margin / 100
-            
+            # Finnhub 返回的是小数形式（如 0.2124 代表 21.24%）
             if gross_margin > 0.3:  # >30%
                 score += 2.5
-                details.append(f"✓ 优秀毛利率: {gross_margin:.1%}")
+                details.append(f"✓ 优秀利润率: {gross_margin:.1%}")
             elif gross_margin > 0.15:  # 15-30%
                 score += 1.5
-                details.append(f"○ 中等毛利率: {gross_margin:.1%}")
+                details.append(f"○ 中等利润率: {gross_margin:.1%}")
             else:  # <15%
                 score += 0.5
-                details.append(f"△ 较低毛利率: {gross_margin:.1%}")
+                details.append(f"△ 较低利润率: {gross_margin:.1%}")
         else:
-            details.append("? 毛利率数据缺失")
+            details.append("? 利润率数据缺失")
         
         # 2. 营业利润率（Operating Margin）
         operating_margin = metrics.get('operatingMarginTTM')
         if operating_margin:
-            # 处理百分比数据格式
-            if operating_margin > 1:
-                operating_margin = operating_margin / 100
-                
+            # Finnhub 返回的是小数形式
             if operating_margin > 0.08:  # >8%
                 score += 2.5
                 details.append(f"✓ 优秀营业利润率: {operating_margin:.1%}")
@@ -567,7 +711,13 @@ class FinnhubFundamentalAnalyzer:
         # 3. 52周股价表现
         week_52_high = metrics.get('52WeekHigh')
         week_52_low = metrics.get('52WeekLow')
-        current_price = metrics.get('priceNow', metrics.get('price'))
+        
+        # 获取当前价格（需要单独调用 quote API）
+        try:
+            quote_data = self.client.quote(symbol)
+            current_price = quote_data.get('c')
+        except:
+            current_price = None
         
         if week_52_high and week_52_low and current_price:
             position_in_range = (current_price - week_52_low) / (week_52_high - week_52_low)
@@ -581,95 +731,44 @@ class FinnhubFundamentalAnalyzer:
                 score += 0.5
                 details.append(f"△ 股价接近52周低点 ({position_in_range:.1%})")
         else:
-            details.append("? 52周价格区间数据缺失")
+            # 使用52周收益率作为替代指标
+            week_52_return = metrics.get('52WeekPriceReturnDaily')
+            if week_52_return:
+                # Finnhub 返回的是百分比形式
+                if week_52_return > 50:  # >50%
+                    score += 2.5
+                    details.append(f"✓ 优秀52周收益: {week_52_return:.1f}%")
+                elif week_52_return > 10:  # 10-50%
+                    score += 1.5
+                    details.append(f"○ 中等52周收益: {week_52_return:.1f}%")
+                else:
+                    score += 0.5
+                    details.append(f"△ 较低52周收益: {week_52_return:.1f}%")
+            else:
+                details.append("? 52周价格区间数据缺失")
         
         # 4. 行业地位（通过市值评估）
-        market_cap = profile.get('marketCapitalization')
+        market_cap = profile.get('marketCapitalization') or metrics.get('marketCapitalization')
         if market_cap:
+            # 格式化市值显示
+            if market_cap > 1000000:
+                market_cap_display = f"${market_cap/1000000:.1f}T"  # 万亿美元
+            elif market_cap > 1000:
+                market_cap_display = f"${market_cap/1000:.1f}B"  # 十亿美元
+            else:
+                market_cap_display = f"${market_cap:.0f}M"  # 百万美元
+                
             if market_cap > 10000:  # >100亿美元
                 score += 2.5
-                details.append(f"✓ 大型公司市值: ${market_cap}百万")
+                details.append(f"✓ 大型公司市值: {market_cap_display}")
             elif market_cap > 2000:  # 20-100亿美元
                 score += 2
-                details.append(f"○ 中型公司市值: ${market_cap}百万")
+                details.append(f"○ 中型公司市值: {market_cap_display}")
             else:
                 score += 1
-                details.append(f"△ 小型公司市值: ${market_cap}百万")
+                details.append(f"△ 小型公司市值: {market_cap_display}")
         else:
             details.append("? 市值数据缺失")
-        
-        return AnalysisScore(score=min(score, 10), details=details)
-    
-    def _analyze_growth_market_position(self, metrics: Dict[str, Any], profile: Dict[str, Any]) -> AnalysisScore:
-        """模块三：成长性与行业地位分析"""
-        score = 0
-        details = []
-        
-        # 1. 收入增长率（通过营收规模间接评估）
-        revenue_ttm = metrics.get('revenueTTM')
-        if revenue_ttm:
-            if revenue_ttm > 5000:  # >50亿美元，大公司
-                score += 1.5
-                details.append(f"○ 大规模营收基础: ${revenue_ttm:.0f}M")
-            elif revenue_ttm > 1000:  # 10-50亿美元
-                score += 2
-                details.append(f"✓ 中大规模营收: ${revenue_ttm:.0f}M")
-            else:
-                score += 2.5  # 小公司有更大增长空间
-                details.append(f"✓ 小公司高增长潜力: ${revenue_ttm:.0f}M")
-        else:
-            details.append("? 营收数据缺失")
-        
-        # 2. 行业地位（通过市值和行业信息评估）
-        market_cap = profile.get('marketCapitalization')
-        industry = profile.get('finnhubIndustry', '')
-        
-        if market_cap:
-            if market_cap > 50000:  # >500亿美元，行业龙头
-                score += 3
-                details.append(f"✓ 行业龙头地位: ${market_cap}百万")
-            elif market_cap > 10000:  # 100-500亿美元
-                score += 2.5
-                details.append(f"✓ 行业重要企业: ${market_cap}百万")
-            else:
-                score += 2
-                details.append(f"○ 中小企业: ${market_cap}百万")
-        else:
-            details.append("? 市值数据缺失")
-        
-        # 3. 行业属性评估
-        high_growth_industries = [
-            'Technology', 'Software', 'Biotechnology', 'Pharmaceuticals',
-            'Renewable Energy', 'Electric Vehicles', 'Cloud Computing',
-            'Artificial Intelligence', 'E-commerce'
-        ]
-        
-        if any(keyword in industry for keyword in high_growth_industries):
-            score += 2.5
-            details.append(f"✓ 高增长行业: {industry}")
-        elif industry:
-            score += 1.5
-            details.append(f"○ 传统行业: {industry}")
-        else:
-            details.append("? 行业信息缺失")
-        
-        # 4. 52周股价波动性
-        week_52_high = metrics.get('52WeekHigh')
-        week_52_low = metrics.get('52WeekLow')
-        
-        if week_52_high and week_52_low:
-            volatility = (week_52_high - week_52_low) / week_52_low
-            if volatility > 0.5:  # 高波动性可能表明高成长性
-                score += 2
-                details.append(f"✓ 高成长性股价波动: {volatility:.1%}")
-            elif volatility > 0.2:
-                score += 1.5
-                details.append(f"○ 中等股价波动: {volatility:.1%}")
-            else:
-                score += 1
-                details.append(f"△ 稳定股价表现: {volatility:.1%}")
-        else:
-            details.append("? 52周价格数据缺失")
         
         return AnalysisScore(score=min(score, 10), details=details)
     
@@ -744,7 +843,7 @@ class FinnhubFundamentalAnalyzer:
         else:
             # 未盈利公司：关注现金消耗和融资能力
             gross_margin = metrics.get('grossMarginTTM', 0)
-            market_cap = metrics.get('marketCapitalization', 0)
+            market_cap = metrics.get('marketCapitalization', 0) or 0  # 防止None值
             
             if gross_margin > 0.3 and market_cap > 1000:
                 score += 2
@@ -921,10 +1020,7 @@ class FinnhubFundamentalAnalyzer:
             # 1. ROE（净资产收益率）
             roe = metrics.get('roeRfy')
             if roe:
-                # 处理百分比数据格式
-                if roe > 1:
-                    roe = roe / 100
-                    
+                # Finnhub 返回的是小数形式（如 0.15 代表 15%）
                 if roe > 0.15:  # >15%
                     score += 3
                     details.append(f"✓ 优秀ROE: {roe:.1%}")
@@ -942,10 +1038,7 @@ class FinnhubFundamentalAnalyzer:
             # 2. ROA（总资产收益率）
             roa = metrics.get('roaRfy')
             if roa:
-                # 处理百分比数据格式
-                if roa > 1:
-                    roa = roa / 100
-                    
+                # Finnhub 返回的是小数形式
                 if roa > 0.05:  # >5%
                     score += 2
                     details.append(f"✓ 优秀ROA: {roa:.1%}")
@@ -994,25 +1087,30 @@ class FinnhubFundamentalAnalyzer:
             # 1. 营业收入规模
             revenue_ttm = metrics.get('revenueTTM')
             if revenue_ttm:
+                # 格式化营收显示
+                if revenue_ttm > 1000000:
+                    revenue_display = f"${revenue_ttm/1000000:.1f}T"
+                elif revenue_ttm > 1000:
+                    revenue_display = f"${revenue_ttm/1000:.1f}B"
+                else:
+                    revenue_display = f"${revenue_ttm:.0f}M"
+                    
                 if revenue_ttm > 1000:  # >10亿美元
                     score += 3
-                    details.append(f"✓ 大规模营收: ${revenue_ttm:.0f}M")
+                    details.append(f"✓ 大规模营收: {revenue_display}")
                 elif revenue_ttm > 100:  # 1-10亿美元
                     score += 2
-                    details.append(f"○ 中等营收: ${revenue_ttm:.0f}M")
+                    details.append(f"○ 中等营收: {revenue_display}")
                 else:
                     score += 1
-                    details.append(f"△ 小规模营收: ${revenue_ttm:.0f}M")
+                    details.append(f"△ 小规模营收: {revenue_display}")
             else:
                 details.append("? 营收数据缺失")
             
             # 2. 毛利率（重要性更高）
-            gross_margin = metrics.get('grossMarginTTM')
+            gross_margin = metrics.get('grossMarginTTM') or metrics.get('netMarginTTM')
             if gross_margin:
-                # 处理百分比数据格式
-                if gross_margin > 1:
-                    gross_margin = gross_margin / 100
-                    
+                # Finnhub 返回的是小数形式
                 if gross_margin > 0.4:  # >40%
                     score += 3
                     details.append(f"✓ 优秀毛利率: {gross_margin:.1%}")

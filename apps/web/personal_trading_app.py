@@ -23,6 +23,7 @@ from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_c
 from data.cache import get_cache
 from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
+from analyzers.fundamental_analyzer import FinnhubFundamentalAnalyzer, analyze_multiple_stocks, generate_analysis_report
 import uuid
 import re
 
@@ -158,7 +159,7 @@ st.markdown("""
 
 # 主标题
 st.title("🎯 个性化交易分析系统")
-st.markdown("基于MACD + RSI + 布林带 + 成交量的技术分析")
+st.markdown("基于技术分析 + 基本面分析的综合投资决策系统")
 
 # 智能缓存提示
 with st.expander("💡 智能缓存策略说明", expanded=False):
@@ -210,7 +211,7 @@ with st.sidebar:
     
     tickers_input = st.text_input(
         "股票代码 (逗号分隔)",
-        value="ZETA,RXRX,BEKE,CRCL,CRWV",
+        value="RXRX,CRCL,CRWV,SBET,NBIS,COIN",
         help="输入要分析的股票代码，多个代码用逗号分隔。支持美股、港股、A股等多个市场"
     )
     
@@ -230,9 +231,16 @@ with st.sidebar:
         )
     
     # 高级选项
-    st.subheader("🔧 高级选项")
+    st.subheader("🔧 分析选项")
+    
+    # 基本面分析选项
+    enable_fundamental_analysis = st.checkbox("启用基本面分析", value=True, help="基于财务指标的五模块分析")
+    
+    # 技术分析显示选项
     show_detailed_indicators = st.checkbox("显示详细技术指标", value=False)
     show_historical_data = st.checkbox("显示历史数据", value=False)
+    
+    # 其他选项
     show_query_history = st.checkbox("显示查询历史", value=False)
     show_cache_stats = st.checkbox("显示缓存统计", value=False)
     auto_refresh = st.checkbox("自动刷新", value=False)
@@ -349,9 +357,9 @@ with st.sidebar:
                 st.info("暂无数据库缓存统计数据")
 
 
-def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None):
+def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None, enable_fundamental: bool = True):
     """
-    简化版股票分析 - 为Streamlit优化，支持数据库记录，支持多市场
+    综合版股票分析 - 支持技术分析 + 基本面分析，支持多市场
     """
     # 检测股票代码市场
     region = detect_market_region(ticker)
@@ -413,6 +421,19 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         except Exception as e:
             st.warning(f"⚠️ 财务指标获取失败: {str(e)}")
         
+        # 基本面分析（可选）
+        fundamental_result = None
+        if enable_fundamental and region == 'us':  # 目前只支持美股基本面分析
+            try:
+                status_text.text(f"📊 基本面分析...")
+                analyzer = FinnhubFundamentalAnalyzer()
+                fundamental_result = analyzer.analyze_stock(ticker)
+                progress_bar.progress(95)
+            except Exception as e:
+                st.warning(f"⚠️ 基本面分析失败: {str(e)}")
+        elif enable_fundamental and region != 'us':
+            st.info(f"📊 基本面分析目前只支持美股，{format_ticker_display(ticker, region)}将跳过基本面分析")
+        
         progress_bar.progress(100)
         status_text.text("✅ 分析完成！")
         
@@ -427,6 +448,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
                 'pe_ratio': pe_ratio,
                 'pb_ratio': pb_ratio
             },
+            'fundamental_analysis': fundamental_result,  # 新增基本面分析结果
             'data_days': len(prices_df),
             'prices_df': prices_df
         }
@@ -661,6 +683,72 @@ def display_detailed_indicators(analysis):
         st.write(f"**放量:** {'是' if volume_details['is_surge'] else '否'}")
 
 
+def display_fundamental_analysis(fundamental_result):
+    """
+    显示基本面分析结果
+    """
+    if not fundamental_result:
+        return
+    
+    st.subheader("📈 基本面分析结果")
+    
+    # 综合评分和投资建议
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("综合评分", f"{fundamental_result.total_score:.1f}/50.0")
+        st.caption(f"综合百分比: {fundamental_result.overall_percentage:.1f}%")
+    
+    with col2:
+        # 投资信号颜色显示
+        signal_colors = {
+            "强烈买入": "#00c851",
+            "买入": "#00c851", 
+            "持有": "#ffbb33",
+            "卖出": "#ff4444",
+            "强烈卖出": "#ff4444"
+        }
+        signal_value = fundamental_result.investment_signal.value
+        color = signal_colors.get(signal_value, "#666666")
+        st.markdown(f"**投资建议:** <span style='color: {color}; font-weight: bold;'>{signal_value}</span>", 
+                   unsafe_allow_html=True)
+    
+    with col3:
+        st.metric("信心度", f"{fundamental_result.confidence:.1f}%")
+        st.caption(f"公司类型: {fundamental_result.company_type.value}")
+    
+    # 五大模块评分
+    st.subheader("📊 五大模块评分")
+    
+    modules = [
+        ("🏢 经营质量", fundamental_result.operating_quality),
+        ("💰 盈利效率", fundamental_result.profitability_efficiency),
+        ("🚀 成长地位", fundamental_result.growth_market_position),
+        ("⚠️ 财务风险", fundamental_result.financial_risk),
+        ("👥 管理治理", fundamental_result.management_governance)
+    ]
+    
+    # 分两行显示
+    for i in range(0, len(modules), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(modules):
+                name, score_obj = modules[i + j]
+                with cols[j]:
+                    st.metric(name, f"{score_obj.score:.1f}/10.0")
+                    st.caption(f"{score_obj.percentage:.1f}%")
+                    
+                    # 显示前3个详情
+                    with st.expander("查看详情"):
+                        for detail in score_obj.details[:3]:
+                            st.write(f"• {detail}")
+    
+    # 详细分析报告
+    with st.expander("📝 详细分析报告", expanded=False):
+        report = generate_analysis_report(fundamental_result)
+        st.text(report)
+
+
 def display_historical_data(analysis):
     """
     显示历史数据
@@ -799,6 +887,7 @@ def main():
         query_record_id = None
         try:
             analysis_params = {
+                'enable_fundamental_analysis': enable_fundamental_analysis,
                 'show_detailed_indicators': show_detailed_indicators,
                 'show_historical_data': show_historical_data,
                 'auto_refresh': auto_refresh
@@ -828,7 +917,8 @@ def main():
                     ticker, 
                     start_date.strftime("%Y-%m-%d"), 
                     end_date.strftime("%Y-%m-%d"),
-                    query_record_id
+                    query_record_id,
+                    enable_fundamental_analysis  # 传递基本面分析选项
                 )
                 
                 if result:
@@ -875,6 +965,11 @@ def main():
                         st.markdown(f"**建议:** {recommendation['recommendation']}")
                         st.write(f"**行动:** {recommendation['action']}")
                         st.write(f"**信心度:** {recommendation['confidence']}%")
+                    
+                    # 基本面分析结果（如果启用）
+                    if result.get('fundamental_analysis'):
+                        st.markdown("---")
+                        display_fundamental_analysis(result['fundamental_analysis'])
                     
                     # 详细指标分析
                     st.subheader("📋 各指标信号")
