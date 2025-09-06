@@ -22,8 +22,11 @@ def check_dependencies():
         import streamlit
     except ImportError:
         print("❌ 缺少依赖包，请先安装:")
-        print("   poetry install")
-        print("   或者: pip install -r requirements.txt")
+        print("   方式1（推荐）: ./install_dependencies.sh")
+        print("   方式2: pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt")
+        print("   方式3: pip install -i https://pypi.tuna.tsinghua.edu.cn/simple streamlit pandas matplotlib plotly yfinance python-dotenv")
+        print("")
+        print("💡 使用国内镜像源可大幅提升下载速度")
         sys.exit(1)
     
     # 检查环境变量文件
