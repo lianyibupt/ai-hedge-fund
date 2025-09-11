@@ -51,7 +51,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
         return None
     
     print(f"✅ 成功获取{len(prices_df)}天的价格数据")
-    print(f"📈 当前价格: ${prices_df['close'].iloc[-1]:.2f}")
+    print(f"📈 当前价格: ${prices_df['close'].iloc[0]:.2f}")
     
     # 生成技术分析信号
     print(f"🔍 开始技术分析...")
@@ -74,7 +74,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str):
     
     return {
         'ticker': ticker,
-        'current_price': prices_df['close'].iloc[-1],
+        'current_price': prices_df['close'].iloc[0],
         'analysis': analysis_result,
         'financial_metrics': {
             'pe_ratio': pe_ratio,

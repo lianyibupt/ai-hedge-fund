@@ -299,7 +299,7 @@ def _generate_detailed_analysis(prices_df, comprehensive_result, trade_decision)
     """
     生成详细的分析报告
     """
-    current_price = prices_df['close'].iloc[-1]
+    current_price = prices_df['close'].iloc[0]  # 使用iloc[0]获取最新价格
     
     analysis = {
         "当前价格": f"{current_price:.2f}",

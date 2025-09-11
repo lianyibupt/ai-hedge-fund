@@ -20,6 +20,7 @@ src_dir = os.path.join(project_root, 'src')
 sys.path.insert(0, src_dir)
 
 from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats, clear_ticker_cache
+from tools.alphavantage_mcp_wrapper import get_alphavantage_wrapper
 from data.cache import get_cache
 from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
@@ -37,6 +38,8 @@ st.set_page_config(
 # 获取数据库管理器和缓存实例
 db_manager = get_database_manager()
 cache_instance = get_cache()
+
+
 
 # 生成会话ID
 if 'session_id' not in st.session_state:
@@ -160,6 +163,8 @@ st.markdown("""
 # 主标题
 st.title("🎯 个性化交易分析系统")
 st.markdown("基于技术分析 + 基本面分析的综合投资决策系统")
+st.markdown("🔄 **数据源**: Alpha Vantage MCP 服务（美股实时数据）")
+
 
 # 智能缓存提示
 with st.expander("💡 智能缓存策略说明", expanded=False):
@@ -175,7 +180,9 @@ with st.expander("💡 智能缓存策略说明", expanded=False):
     
     🔹 **缓存命中率显示**: 查询结果会显示缓存命中率，帮助您了解系统效率
     
-    🔹 **多级缓存架构**: 内存缓存 → SQLite缓存 → iTick API，确保最佳性能
+    🔹 **多级缓存架构**: 内存缓存 → SQLite缓存 → Alpha Vantage MCP，确保最佳性能
+    
+    🔹 **纯美股数据**: 现在使用 Alpha Vantage MCP 服务，主要支持美股市场实时数据
     """)
 
 # 侧边栏参数设置
@@ -188,31 +195,30 @@ with st.sidebar:
     # 市场支持信息
     with st.expander("🌍 支持的市场和格式", expanded=False):
         st.markdown("""
-        **支持的市场:**
-        - 🇺🇸 **美股** (US): AAPL, MSFT, GOOGL, TSLA
-        - 🇭🇰 **港股** (HK): 00700, 09988, HK.00700, HK.09988
-        - 🇨🇳 **上证** (SH): 600519, 000001.SH, 600036.SH
-        - 🇨🇳 **深证** (SZ): 000001, 000002.SZ, 300750.SZ
-        - 🇸🇬 **新加坡** (SG): 支持，待完善格式检测
-        - 🇯🇵 **日本** (JP): 支持，待完善格式检测
+        **主要支持的市场:**
+        - 🇺🇸 **美股** (US): AAPL, MSFT, GOOGL, TSLA - **主要支持，数据最全**
+        
+        **有限支持的市场:**
+        - 🇭🇰 **港股** (HK): 00700, 09988 - 部分支持，主要依赖缓存数据
+        - 🇨🇳 **A股** (SH/SZ): 600519, 000001 - 部分支持，主要依赖缓存数据
         
         **格式示例:**
-        - 美股: `AAPL,MSFT,NVDA`
-        - 港股: `00700,09988,03690` 或 `HK.00700,HK.09988`
-        - 上证: `600519,600036` 或 `600519.SH,600036.SH`
-        - 深证: `000001,000002,300750` 或 `000001.SZ,000002.SZ`
-        - 混合: `AAPL,00700,600519,000001`
+        - 美股: `AAPL,MSFT,NVDA,TSLA`
+        - 港股: `00700,09988,03690` (可能需要缓存数据)
+        - A股: `600519,000001` (可能需要缓存数据)
+        - 混合: `AAPL,MSFT,NVDA` (建议主要使用美股)
         
-        **注意事项:**
-        - 系统会自动检测股票代码的市场区域
-        - 不同市场的数据来源和更新频率可能不同
-        - 部分市场的财务数据可能有限
+        **重要说明:**
+        - 🔄 **数据源已更新**: 从 iTick API 更换为 Alpha Vantage MCP 服务
+        - 🇺🇸 **美股数据**: 实时、准确、全面，包括技术分析和基本面分析
+        - 🌍 **其他市场**: 依赖历史缓存数据，可能不是最新数据
+        - 📊 **基本面分析**: 仅支持美股市场
         """)
     
     tickers_input = st.text_input(
         "股票代码 (逗号分隔)",
-        value="RXRX,CRCL,CRWV,SBET,NBIS,COIN",
-        help="输入要分析的股票代码，多个代码用逗号分隔。支持美股、港股、A股等多个市场"
+        value="RXRX,CRWV,SBET,CRCL,NBIS",
+        help="输入要分析的股票代码，多个代码用逗号分隔。建议使用美股代码获得最佳数据质量"
     )
     
     # 日期范围选择
@@ -389,7 +395,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
             error_msg = f"⚠️ 无法获取 {ticker_display} 的价格数据。可能的原因：\n"
             error_msg += f"• 股票代码 {ticker} 可能不存在或已退市\n"
             error_msg += f"• 查询日期范围可能包含未来日期\n"
-            error_msg += f"• 市场 {region.upper()} 可能暂时不可用\n"
+            error_msg += f"• 市场 {region.upper()} 可能不被 Alpha Vantage 支持（建议使用美股代码）\n"
             error_msg += f"• 网络连接或API服务问题"
             st.error(error_msg)
             return None
@@ -437,12 +443,23 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         progress_bar.progress(100)
         status_text.text("✅ 分析完成！")
         
-        # 组装结果
+        # 组装结果 - 修复当前价格获取逻辑
+        # 尝试获取实时报价作为当前价格
+        try:
+            from tools.alphavantage_mcp_wrapper import get_alphavantage_wrapper
+            wrapper = get_alphavantage_wrapper()
+            current_quote = wrapper.get_real_time_quote(ticker)
+            current_price = current_quote.close if current_quote else prices_df['close'].iloc[0]  # 使用iloc[0]获取最新价格
+            print(f"💰 当前价格: {current_price} ({'实时报价' if current_quote else '最新历史数据'})")
+        except Exception as e:
+            print(f"⚠️ 获取实时报价失败，使用历史数据: {str(e)}")
+            current_price = prices_df['close'].iloc[0]  # 使用iloc[0]获取最新价格
+        
         result = {
             'ticker': ticker,
             'ticker_display': ticker_display,
             'region': region,
-            'current_price': prices_df['close'].iloc[-1],
+            'current_price': current_price,
             'analysis': analysis_result,
             'financial_metrics': {
                 'pe_ratio': pe_ratio,

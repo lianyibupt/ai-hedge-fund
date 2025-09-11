@@ -1,7 +1,7 @@
 import os
 import pandas as pd
 from typing import Optional
-from .itick_api import get_itick_api, date_to_timestamp
+from .alphavantage_mcp import fetch_prices_from_alphavantage, fetch_financial_metrics_from_alphavantage, test_alphavantage_mcp_connection
 import re
 
 from data.cache import get_cache
@@ -159,9 +159,9 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
     # 3. 对缺失的日期范围请求API
     new_prices = []
     for missing_start, missing_end in missing_ranges:
-        print(f"🔄 从 iTick API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
+        print(f"🔄 从 Alpha Vantage MCP 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
         try:
-            range_prices = _fetch_prices_from_itick(ticker, missing_start, missing_end, region)
+            range_prices = _fetch_prices_from_alphavantage(ticker, missing_start, missing_end, region)
             if range_prices:
                 new_prices.extend(range_prices)
                 print(f"✅ 成功获取 {len(range_prices)} 条新数据")
@@ -183,7 +183,8 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
     
     # 5. 合并所有数据
     all_prices = all_cached_prices + new_prices
-    all_prices.sort(key=lambda x: x.time)
+    # 按日期倒序排序，确保最新数据在前
+    all_prices.sort(key=lambda x: x.time, reverse=True)
     
     # 过滤到请求的日期范围
     filtered_prices = [p for p in all_prices if start_date <= p.time <= end_date]
@@ -315,15 +316,15 @@ def get_financial_metrics(
     except Exception as e:
         print(f"⚠️ SQLite财务缓存读取失败: {str(e)}")
 
-    # 第三级：从iTick API获取数据
-    print(f"🔄 从 iTick API 获取 {ticker} 的财务指标...")
+    # 第三级：从 Alpha Vantage MCP 获取数据
+    print(f"🔄 从 Alpha Vantage MCP 获取 {ticker} 的财务指标...")
     try:
-        metrics = _fetch_financial_metrics_from_itick(ticker, end_date, period, limit, region)
+        metrics = _fetch_financial_metrics_from_alphavantage(ticker, end_date, period, limit, region)
         
         if not metrics:
-            raise Exception(f"iTick API 返回空财务数据，股票代码: {ticker}")
+            raise Exception(f"Alpha Vantage MCP 返回空财务数据，股票代码: {ticker}")
             
-        print(f"✅ 成功从 iTick API 获取到财务指标")
+        print(f"✅ 成功从 Alpha Vantage MCP 获取到财务指标")
         
         # 存储到双级缓存
         metric_dicts = [m.model_dump() for m in metrics]
@@ -338,8 +339,8 @@ def get_financial_metrics(
         return metrics
         
     except Exception as e:
-        print(f"❌ iTick API 获取财务指标失败: {str(e)}")
-        raise Exception(f"无法从 iTick API 获取 {ticker} 的财务指标: {str(e)}")
+        print(f"❌ Alpha Vantage MCP 获取财务指标失败: {str(e)}")
+        raise Exception(f"无法从 Alpha Vantage MCP 获取 {ticker} 的财务指标: {str(e)}")
 
 
 
@@ -355,9 +356,9 @@ def search_line_items(
     period: str = "ttm",
     limit: int = 10,
 ) -> list[LineItem]:
-    """Fetch line items using iTick API."""
+    """Fetch line items using Alpha Vantage MCP."""
     try:
-        # Get financial metrics from iTick API
+        # Get financial metrics from Alpha Vantage MCP
         metrics = get_financial_metrics(ticker, end_date, period, limit)
         
         if not metrics:
@@ -389,7 +390,7 @@ def search_line_items(
         return line_items_result
         
     except Exception as e:
-        raise Exception(f"Error fetching line items from iTick API: {ticker} - {str(e)}")
+        raise Exception(f"Error fetching line items from Alpha Vantage MCP: {ticker} - {str(e)}")
 
 
 def get_insider_trades(
@@ -456,7 +457,8 @@ def prices_to_df(prices: list[Price]) -> pd.DataFrame:
     numeric_cols = ["open", "close", "high", "low", "volume"]
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df.sort_index(inplace=True)
+    # 保持数据按日期顺序排列（最新在前）
+    df.sort_index(ascending=False, inplace=True)
     return df
 
 
@@ -500,8 +502,8 @@ def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
 # Data Source Implementations
 # =============================================================================
 
-def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
-    """从iTick API获取价格数据
+def _fetch_prices_from_alphavantage(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从Alpha Vantage MCP服务获取价格数据
     
     Args:
         ticker: 股票代码
@@ -509,23 +511,11 @@ def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region
         end_date: 结束日期
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    itick_api = get_itick_api()
+    # Alpha Vantage 主要支持美股，对其他市场发出警告
+    if region != 'us':
+        print(f"⚠️ Alpha Vantage 主要支持美股，{ticker} 市场区域 {region} 可能不支持")
     
-    # 转换日期为时间戳
-    start_timestamp = date_to_timestamp(start_date)
-    end_timestamp = date_to_timestamp(end_date)
-    
-    # 获取历史K线数据
-    kline_data = itick_api.get_historical_kline(
-        ticker=ticker,
-        period="1d",
-        start_time=str(start_timestamp),
-        end_time=str(end_timestamp),
-        region=region
-    )
-    
-    # 转换为Price对象
-    return itick_api.convert_to_price_objects(kline_data, ticker)
+    return fetch_prices_from_alphavantage(ticker, start_date, end_date, region)
 
 
 
@@ -534,14 +524,14 @@ def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region
 
 
 
-def _fetch_financial_metrics_from_itick(
+def _fetch_financial_metrics_from_alphavantage(
     ticker: str,
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
     region: str = 'us',
 ) -> list[FinancialMetrics]:
-    """从iTick API获取财务指标
+    """从Alpha Vantage MCP服务获取财务指标
     
     Args:
         ticker: 股票代码
@@ -550,13 +540,11 @@ def _fetch_financial_metrics_from_itick(
         limit: 数据限制
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    itick_api = get_itick_api()
+    # Alpha Vantage 主要支持美股
+    if region != 'us':
+        print(f"⚠️ Alpha Vantage 主要支持美股财务数据，{ticker} 市场区域 {region} 可能不支持")
     
-    # 获取财务数据
-    financial_data = itick_api.get_financial_data(ticker, region=region)
-    
-    # 转换为FinancialMetrics对象
-    return itick_api.convert_to_financial_metrics(financial_data, ticker)
+    return fetch_financial_metrics_from_alphavantage(ticker, end_date, period, limit, region)
 
 
 
