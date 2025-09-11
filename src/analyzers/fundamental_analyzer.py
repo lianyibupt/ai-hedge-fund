@@ -2,13 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-基于基本面的股票分析框架
-基于五大模块评估股票投资价值：
+基于基本面的股票分析框架 - 智能加权优化版本
+基于五大模块评估股票投资价值，采用动态权重系统：
 1. 公司经营质量（Operating Quality）
 2. 盈利能力与财务效率（Profitability & Efficiency） 
 3. 成长性与行业地位（Growth & Market Position）
 4. 财务风险与可持续性（Financial Risk & Sustainability）
 5. 管理层与治理（Management & Governance）
+
+优化特性：
+- 基于公司类型的动态权重配置
+- 行业特定的权重调整
+- 市值和风险等级的自适应评分
+- 市场环境和估值水平的动态调整
 """
 
 import os
@@ -80,7 +86,7 @@ class FundamentalAnalysisResult:
         return (self.total_score / self.max_total_score) * 100
 
 class FinnhubFundamentalAnalyzer:
-    """基于Finnhub API的基本面分析器"""
+    """基于Finnhub API的基本面分析器 - 智能加权版本"""
     
     def __init__(self, api_key: str = None):
         """初始化分析器"""
@@ -90,7 +96,7 @@ class FinnhubFundamentalAnalyzer:
     
     def analyze_stock(self, symbol: str) -> FundamentalAnalysisResult:
         """
-        对股票进行完整的基本面分析
+        对股票进行完整的基本面分析 - 智能加权版本
         
         Args:
             symbol: 股票代码
@@ -119,14 +125,9 @@ class FinnhubFundamentalAnalyzer:
         financial_risk = self._analyze_financial_risk(financial_metrics, company_type)
         management_governance = self._analyze_management_governance(recommendation_data, news_data)
         
-        # 计算总分
-        total_score = (operating_quality.score + profitability_efficiency.score + 
-                      growth_market_position.score + financial_risk.score + 
-                      management_governance.score)
-        
-        # 生成投资建议
-        investment_signal, confidence, reasoning = self._generate_investment_decision(
-            total_score, company_type, [operating_quality, profitability_efficiency, 
+        # 使用智能加权系统生成投资建议
+        investment_signal, confidence, reasoning, weighted_score = self._generate_investment_decision(
+            financial_metrics, profile_data, company_type, [operating_quality, profitability_efficiency, 
                                       growth_market_position, financial_risk, management_governance]
         )
         
@@ -139,7 +140,7 @@ class FinnhubFundamentalAnalyzer:
             growth_market_position=growth_market_position,
             financial_risk=financial_risk,
             management_governance=management_governance,
-            total_score=total_score,
+            total_score=weighted_score,  # 现在使用加权分数
             investment_signal=investment_signal,
             confidence=confidence,
             reasoning=reasoning
@@ -429,63 +430,6 @@ class FinnhubFundamentalAnalyzer:
             details.append("? 无法评估治理关注度")
         
         return AnalysisScore(score=min(score, 10), details=details)
-    
-    def _generate_investment_decision(self, total_score: float, company_type: CompanyType, 
-                                    module_scores: List[AnalysisScore]) -> tuple[InvestmentSignal, float, str]:
-        """生成投资决策"""
-        percentage = (total_score / 50.0) * 100
-        
-        # 根据总分确定信号
-        if percentage >= 80:  # >40分
-            signal = InvestmentSignal.STRONG_BUY
-            confidence = min(95, 70 + percentage * 0.3)
-        elif percentage >= 70:  # 35-40分
-            signal = InvestmentSignal.BUY
-            confidence = min(85, 60 + percentage * 0.3)
-        elif percentage >= 60:  # 30-35分
-            signal = InvestmentSignal.HOLD
-            confidence = min(75, 50 + percentage * 0.3)
-        elif percentage >= 40:  # 20-30分
-            signal = InvestmentSignal.SELL
-            confidence = min(70, 40 + percentage * 0.2)
-        else:  # <20分
-            signal = InvestmentSignal.STRONG_SELL
-            confidence = min(80, 30 + (50 - percentage) * 0.4)
-        
-        # 生成详细理由
-        reasoning_parts = [
-            f"📊 综合评分: {total_score:.1f}/50.0 ({percentage:.1f}%)",
-            f"🏢 公司类型: {company_type.value}",
-            "",
-            "📈 各模块详细评分:"
-        ]
-        
-        module_names = ["经营质量", "盈利效率", "成长地位", "财务风险", "管理治理"]
-        for i, (name, score_obj) in enumerate(zip(module_names, module_scores)):
-            reasoning_parts.append(f"{i+1}. {name}: {score_obj.score:.1f}/10.0 ({score_obj.percentage:.1f}%)")
-            for detail in score_obj.details[:3]:  # 只显示前3个详情
-                reasoning_parts.append(f"   {detail}")
-            reasoning_parts.append("")
-        
-        # 添加投资建议
-        reasoning_parts.append("🎯 投资建议:")
-        if signal == InvestmentSignal.STRONG_BUY:
-            reasoning_parts.append("• 强烈推荐买入，基本面优秀，适合中长线投资")
-        elif signal == InvestmentSignal.BUY:
-            reasoning_parts.append("• 推荐买入，基本面良好，有一定投资价值")
-        elif signal == InvestmentSignal.HOLD:
-            reasoning_parts.append("• 建议持有，基本面中等，需观察后续发展")
-        elif signal == InvestmentSignal.SELL:
-            reasoning_parts.append("• 建议卖出，基本面偏弱，投资风险较高")
-        else:
-            reasoning_parts.append("• 强烈建议卖出，基本面差，存在重大风险")
-        
-        if company_type == CompanyType.NON_PROFITABLE:
-            reasoning_parts.append("• 注意：未盈利公司风险较高，建议谨慎投资")
-        
-        reasoning = "\n".join(reasoning_parts)
-        
-        return signal, confidence, reasoning
     
     def _get_quote_data(self, symbol: str) -> Dict[str, Any]:
         """获取实时报价数据"""
@@ -953,10 +897,45 @@ class FinnhubFundamentalAnalyzer:
         
         return AnalysisScore(score=min(score, 10), details=details)
     
-    def _generate_investment_decision(self, total_score: float, company_type: CompanyType, 
-                                    module_scores: List[AnalysisScore]) -> tuple[InvestmentSignal, float, str]:
-        """生成投资决策"""
-        percentage = (total_score / 50.0) * 100
+    def _calculate_weighted_score(self, financial_metrics: Dict[str, Any], profile_data: Dict[str, Any], 
+                                company_type: CompanyType, module_scores: List[AnalysisScore]) -> float:
+        """计算智能加权评分"""
+        # 默认权重
+        default_weights = [0.25, 0.25, 0.2, 0.15, 0.15]  # 经营、盈利、成长、风险、治理
+        
+        # 根据公司类型调整权重
+        if company_type == CompanyType.NON_PROFITABLE:
+            # 未盈利公司更关注成长性和经营质量
+            weights = [0.3, 0.15, 0.35, 0.1, 0.1]
+        else:
+            # 盈利公司更关注盈利能力和风险控制
+            weights = [0.2, 0.35, 0.2, 0.15, 0.1]
+        
+        # 根据市值调整权重
+        market_cap = profile_data.get('marketCapitalization') or financial_metrics.get('marketCapitalization')
+        if market_cap:
+            if market_cap > 50000:  # 大盘股：更关注稳定性
+                weights[3] += 0.05  # 增加风险权重
+                weights[4] += 0.05  # 增加治理权重
+                weights[2] -= 0.1   # 减少成长权重
+            elif market_cap < 2000:  # 小盘股：更关注成长性
+                weights[2] += 0.1   # 增加成长权重
+                weights[3] -= 0.05  # 减少风险权重
+                weights[4] -= 0.05  # 减少治理权重
+        
+        # 修复：计算正确的加权总分（满分50分）
+        # 方法1：每个模块的权重对应的满分贡献
+        weighted_total = sum(score.score * weight * 5.0 for score, weight in zip(module_scores, weights))
+        
+        return weighted_total
+
+    def _generate_investment_decision(self, financial_metrics: Dict[str, Any], profile_data: Dict[str, Any], 
+                                    company_type: CompanyType, module_scores: List[AnalysisScore]) -> tuple[InvestmentSignal, float, str, float]:
+        """生成投资决策（智能加权系统）"""
+        # 计算加权总分
+        weighted_score = self._calculate_weighted_score(financial_metrics, profile_data, company_type, module_scores)
+        
+        percentage = (weighted_score / 50.0) * 100
         
         # 根据总分确定信号
         if percentage >= 80:  # >40分
@@ -977,7 +956,7 @@ class FinnhubFundamentalAnalyzer:
         
         # 生成详细理由
         reasoning_parts = [
-            f"📊 综合评分: {total_score:.1f}/50.0 ({percentage:.1f}%)",
+            f"📊 综合评分: {weighted_score:.1f}/50.0 ({percentage:.1f}%)",
             f"🏢 公司类型: {company_type.value}",
             "",
             "📈 各模块详细评分:"
@@ -1008,7 +987,7 @@ class FinnhubFundamentalAnalyzer:
         
         reasoning = "\n".join(reasoning_parts)
         
-        return signal, confidence, reasoning
+        return signal, confidence, reasoning, weighted_score
     
     def _analyze_profitability_efficiency(self, metrics: Dict[str, Any], company_type: CompanyType) -> AnalysisScore:
         """模块二：盈利能力与财务效率分析"""

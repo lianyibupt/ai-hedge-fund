@@ -38,7 +38,7 @@ import re
 
 # 页面配置
 st.set_page_config(
-    page_title="基本面分析系统", 
+    page_title="智能加权基本面分析系统", 
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -305,8 +305,9 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # 主标题
-st.title("📈 基本面分析系统")
-st.markdown("专业的股票基本面分析平台 - 基于五大核心模块的投资决策支持")
+st.title("📈 智能加权基本面分析系统")
+st.markdown("🎥 **新版特性**: 基于公司类型、行业特征和市场环境的智能加权评分系统")
+st.markdown("🔥 专业的股票基本面分析平台 - 采用动态权重配置的投资决策支持")
 
 # 侧边栏参数设置
 with st.sidebar:

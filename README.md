@@ -50,6 +50,39 @@ By using this software, you agree to use it solely for learning purposes.
 
 ## Setup
 
+### 国内用户快速安装 (Chinese Users Quick Setup)
+
+**方式1: 使用自动安装脚本（推荐）**
+```bash
+# 克隆项目
+git clone https://github.com/virattt/ai-hedge-fund.git
+cd ai-hedge-fund
+
+# 运行自动安装脚本（已配置国内镜像源）
+./install_dependencies.sh
+```
+
+**方式2: 手动使用国内镜像安装**
+```bash
+# 升级 pip
+python3 -m pip install --upgrade pip -i https://pypi.tuna.tsinghua.edu.cn/simple
+
+# 安装核心依赖
+pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple streamlit pandas matplotlib plotly yfinance python-dotenv
+
+# 安装完整依赖（可选）
+pip3 install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt
+```
+
+**方式3: Poetry + 国内镜像**
+```bash
+# 配置 Poetry 使用国内镜像
+poetry config repositories.tsinghua https://pypi.tuna.tsinghua.edu.cn/simple
+poetry install
+```
+
+### International Users Setup
+
 Clone the repository:
 ```bash
 git clone https://github.com/virattt/ai-hedge-fund.git
