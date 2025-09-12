@@ -61,6 +61,8 @@ def fetch_financial_metrics_from_alphavantage(
     """
     从 Alpha Vantage HTTP API 获取财务指标
     
+    注意：此函数已弃用，建议使用 Finnhub API 获取财务数据
+    
     Args:
         ticker: 股票代码
         end_date: 结束日期
@@ -71,6 +73,9 @@ def fetch_financial_metrics_from_alphavantage(
     Returns:
         FinancialMetrics 对象列表
     """
+    print(f"⚠️ Alpha Vantage 财务数据接口已弃用，建议使用 Finnhub API")
+    print(f"🔄 尝试从 Alpha Vantage 获取基础财务数据...")
+    
     try:
         if region != 'us':
             print(f"⚠️ Alpha Vantage 主要支持美股财务数据，{ticker} 市场区域 {region} 可能不支持")
@@ -86,11 +91,12 @@ def fetch_financial_metrics_from_alphavantage(
             print(f"⚠️ Alpha Vantage HTTP API 返回空财务数据，股票代码: {ticker}")
             return []
         
-        print(f"✅ 成功从 Alpha Vantage HTTP API 获取财务指标")
+        print(f"✅ 成功从 Alpha Vantage HTTP API 获取财务指标（有限数据）")
         return metrics[:limit]
         
     except Exception as e:
         print(f"❌ Alpha Vantage HTTP API 财务指标获取失败: {str(e)}")
+        print(f"💡 建议使用 Finnhub API 获取更完整的财务数据")
         raise Exception(f"无法从 Alpha Vantage HTTP API 获取 {ticker} 的财务指标: {str(e)}")
 
 

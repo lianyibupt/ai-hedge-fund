@@ -1,7 +1,8 @@
 import os
 import pandas as pd
 from typing import Optional
-from .alphavantage_mcp import fetch_prices_from_alphavantage, fetch_financial_metrics_from_alphavantage, test_alphavantage_mcp_connection
+from .alphavantage_mcp import fetch_prices_from_alphavantage, test_alphavantage_mcp_connection
+from .finnhub_financial_api import fetch_financial_metrics_from_finnhub, test_finnhub_financial_connection
 from .rapidapi_yahoo_finance_wrapper import (
     fetch_prices_from_rapidapi_yahoo_mcp,
     fetch_financial_metrics_from_rapidapi_yahoo_mcp,
@@ -335,15 +336,15 @@ def get_financial_metrics(
     except Exception as e:
         print(f"⚠️ SQLite财务缓存读取失败: {str(e)}")
 
-    # 第三级：从 Alpha Vantage MCP 获取数据
-    print(f"🔄 从 Alpha Vantage MCP 获取 {ticker} 的财务指标...")
+    # 第三级：从 Finnhub API 获取数据
+    print(f"🔄 从 Finnhub API 获取 {ticker} 的财务指标...")
     try:
-        metrics = _fetch_financial_metrics_from_alphavantage(ticker, end_date, period, limit, region)
+        metrics = _fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
         
         if not metrics:
-            raise Exception(f"Alpha Vantage MCP 返回空财务数据，股票代码: {ticker}")
+            raise Exception(f"Finnhub API 返回空财务数据，股票代码: {ticker}")
             
-        print(f"✅ 成功从 Alpha Vantage MCP 获取到财务指标")
+        print(f"✅ 成功从 Finnhub API 获取到财务指标")
         
         # 存储到双级缓存
         metric_dicts = [m.model_dump() for m in metrics]
@@ -358,8 +359,8 @@ def get_financial_metrics(
         return metrics
         
     except Exception as e:
-        print(f"❌ Alpha Vantage MCP 获取财务指标失败: {str(e)}")
-        raise Exception(f"无法从 Alpha Vantage MCP 获取 {ticker} 的财务指标: {str(e)}")
+        print(f"❌ Finnhub API 获取财务指标失败: {str(e)}")
+        raise Exception(f"无法从 Finnhub API 获取 {ticker} 的财务指标: {str(e)}")
 
 
 
@@ -543,14 +544,14 @@ def _fetch_prices_from_alphavantage(ticker: str, start_date: str, end_date: str,
 
 
 
-def _fetch_financial_metrics_from_alphavantage(
+def _fetch_financial_metrics_from_finnhub(
     ticker: str,
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
     region: str = 'us',
 ) -> list[FinancialMetrics]:
-    """从Alpha Vantage MCP服务获取财务指标
+    """从Finnhub API获取财务指标
     
     Args:
         ticker: 股票代码
@@ -559,11 +560,11 @@ def _fetch_financial_metrics_from_alphavantage(
         limit: 数据限制
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    # Alpha Vantage 主要支持美股
+    # Finnhub 主要支持美股
     if region != 'us':
-        print(f"⚠️ Alpha Vantage 主要支持美股财务数据，{ticker} 市场区域 {region} 可能不支持")
+        print(f"⚠️ Finnhub 主要支持美股财务数据，{ticker} 市场区域 {region} 可能不支持")
     
-    return fetch_financial_metrics_from_alphavantage(ticker, end_date, period, limit, region)
+    return fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
 
 
 def _fetch_prices_from_rapidapi_yahoo(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:

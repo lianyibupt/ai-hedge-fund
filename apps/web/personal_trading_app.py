@@ -446,11 +446,12 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         # 组装结果 - 修复当前价格获取逻辑
         # 尝试获取实时报价作为当前价格
         try:
-            from tools.alphavantage_mcp_wrapper import get_alphavantage_wrapper
-            wrapper = get_alphavantage_wrapper()
-            current_quote = wrapper.get_real_time_quote(ticker)
-            current_price = current_quote.close if current_quote else prices_df['close'].iloc[0]  # 使用iloc[0]获取最新价格
-            print(f"💰 当前价格: {current_price} ({'实时报价' if current_quote else '最新历史数据'})")
+            # 优先使用价格数据中的最新价格
+            current_price = prices_df['close'].iloc[0] if len(prices_df) > 0 else None
+            print(f"💰 当前价格: {current_price} (来自历史数据最新记录)")
+            
+            # 如果需要更准确的实时数据，可以调用其他API
+            # 注意：这里移除了AlphaVantage的实时报价获取
         except Exception as e:
             print(f"⚠️ 获取实时报价失败，使用历史数据: {str(e)}")
             current_price = prices_df['close'].iloc[0]  # 使用iloc[0]获取最新价格
