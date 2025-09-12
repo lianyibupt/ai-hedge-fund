@@ -217,16 +217,21 @@ class RapidAPIYahooFinance:
                     if end_date and timestamp > end_date:
                         continue
                     
-                    price = Price(
-                        ticker=symbol,
-                        time=timestamp,
-                        open=float(open_price),
-                        high=float(high_price or close_price),
-                        low=float(low_price or close_price),
-                        close=float(close_price),
-                        volume=int(volume)
-                    )
-                    prices.append(price)
+                    # 确保所有数值都是有效的
+                    try:
+                        price = Price(
+                            ticker=symbol,
+                            time=timestamp,
+                            open=float(open_price) if open_price is not None else 0.0,
+                            high=float(high_price) if high_price is not None else float(close_price) if close_price is not None else 0.0,
+                            low=float(low_price) if low_price is not None else float(close_price) if close_price is not None else 0.0,
+                            close=float(close_price) if close_price is not None else 0.0,
+                            volume=int(volume) if volume is not None else 0
+                        )
+                        prices.append(price)
+                    except (ValueError, TypeError) as e:
+                        print(f"⚠️ 数据转换错误 ({symbol} {timestamp}): {str(e)}")
+                        continue
             
             # 按日期倒序排序，确保最新数据在前
             prices.sort(key=lambda x: x.time, reverse=True)

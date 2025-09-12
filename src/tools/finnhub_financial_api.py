@@ -160,41 +160,71 @@ class FinnhubFinancialAPI:
                 price_to_sales_ratio=safe_float(metrics.get("psTTM")),
                 enterprise_value_to_ebitda_ratio=None,  # Finnhub 不直接提供
                 enterprise_value_to_revenue_ratio=None,  # Finnhub 不直接提供
-                peg_ratio=None,  # Finnhub 不直接提供
+                free_cash_flow_yield=safe_float(metrics.get("freeCashFlowYieldTTM")),  # 添加此字段
+                peg_ratio=safe_float(metrics.get("pegRatio")),  # 添加此字段
                 
                 # 盈利能力指标
                 return_on_equity=safe_float(metrics.get("roeRfy")),
                 return_on_assets=safe_float(metrics.get("roaRfy")),
+                return_on_invested_capital=safe_float(metrics.get("roicTTM")),  # 添加此字段
                 gross_margin=safe_float(metrics.get("grossMarginTTM")),
                 operating_margin=safe_float(metrics.get("operatingMarginTTM")),
                 net_margin=safe_float(metrics.get("netMarginTTM")),
                 
+                # 运营效率指标
+                asset_turnover=safe_float(metrics.get("assetTurnoverTTM")),  # 添加此字段
+                inventory_turnover=safe_float(metrics.get("inventoryTurnoverTTM")),  # 添加此字段
+                receivables_turnover=safe_float(metrics.get("receivablesTurnoverTTM")),  # 添加此字段
+                days_sales_outstanding=safe_float(metrics.get("daysOfSalesOutstandingTTM")),  # 添加此字段
+                operating_cycle=safe_float(metrics.get("operatingCycleTTM")),  # 添加此字段
+                working_capital_turnover=safe_float(metrics.get("workingCapitalTurnoverTTM")),  # 添加此字段
+                
                 # 流动性指标
                 current_ratio=safe_float(metrics.get("currentRatioQuarterly")),
                 quick_ratio=safe_float(metrics.get("quickRatioQuarterly")),
+                cash_ratio=safe_float(metrics.get("cashRatioQuarterly")),  # 添加此字段
+                operating_cash_flow_ratio=safe_float(metrics.get("operatingCashFlowRatioTTM")),  # 添加此字段
                 
                 # 杠杆指标
                 debt_to_equity=safe_float(metrics.get("totalDebt/totalEquityQuarterly")),
+                debt_to_assets=safe_float(metrics.get("debtToAssetsQuarterly")),  # 添加此字段
+                interest_coverage=safe_float(metrics.get("interestCoverageTTM")),  # 添加此字段
                 
                 # 每股指标
                 earnings_per_share=safe_float(metrics.get("epsBasicExclExtraItemsTTM")),
                 book_value_per_share=safe_float(metrics.get("bookValuePerShareQuarterly")),
+                free_cash_flow_per_share=safe_float(metrics.get("freeCashFlowPerShareTTM")),  # 添加此字段
                 
                 # 增长指标 - Finnhub 提供的增长数据
                 revenue_growth=safe_float(metrics.get("revenueGrowthTTMYoy")),
                 earnings_growth=safe_float(metrics.get("epsGrowthTTMYoy")),
+                book_value_growth=safe_float(metrics.get("bookValuePerShareGrowthYoy")),  # 添加此字段
+                earnings_per_share_growth=safe_float(metrics.get("epsGrowthYoy")),  # 添加此字段
+                free_cash_flow_growth=safe_float(metrics.get("freeCashFlowGrowthYoy")),  # 添加此字段
+                operating_income_growth=safe_float(metrics.get("operatingIncomeGrowthYoy")),  # 添加此字段
+                ebitda_growth=safe_float(metrics.get("ebitdaGrowthYoy")),  # 添加此字段
                 
                 # 股息指标
                 payout_ratio=safe_float(metrics.get("payoutRatioAnnual") or metrics.get("dividendYieldIndicatedAnnual")),
-                
-                # 其他指标暂时设为None（Finnhub不直接提供或需要计算）
             )
             
             return [financial_metrics]
             
         except Exception as e:
             print(f"⚠️ Finnhub 财务数据转换失败: {str(e)}")
-            return []
+            # 即使转换失败，也返回一个基本的FinancialMetrics对象
+            try:
+                # 创建一个基本的FinancialMetrics对象，只包含可用的字段
+                basic_metrics = FinancialMetrics(
+                    ticker=ticker,
+                    report_period=datetime.now().strftime("%Y-%m-%d"),
+                    period="ttm",
+                    currency="USD"
+                )
+                return [basic_metrics]
+            except Exception as fallback_e:
+                print(f"⚠️ Finnhub 财务数据基本转换也失败: {str(fallback_e)}")
+                return []
     
     def test_connection(self) -> bool:
         """

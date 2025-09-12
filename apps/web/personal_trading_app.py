@@ -447,14 +447,16 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         # 尝试获取实时报价作为当前价格
         try:
             # 优先使用价格数据中的最新价格
-            current_price = prices_df['close'].iloc[0] if len(prices_df) > 0 else None
+            # 由于prices_df已经按日期正序排列，最新的价格在最后
+            current_price = prices_df['close'].iloc[-1] if len(prices_df) > 0 else None
             print(f"💰 当前价格: {current_price} (来自历史数据最新记录)")
             
             # 如果需要更准确的实时数据，可以调用其他API
             # 注意：这里移除了AlphaVantage的实时报价获取
         except Exception as e:
             print(f"⚠️ 获取实时报价失败，使用历史数据: {str(e)}")
-            current_price = prices_df['close'].iloc[0]  # 使用iloc[0]获取最新价格
+            # 由于prices_df已经按日期正序排列，最新的价格在最后
+            current_price = prices_df['close'].iloc[-1] if len(prices_df) > 0 else None  # 使用iloc[-1]获取最新价格
         
         result = {
             'ticker': ticker,
@@ -590,7 +592,8 @@ def create_price_chart(prices_df, ticker, analysis):
     # MACD图
     if 'raw_data' in analysis and 'macd_data' in analysis['raw_data']:
         macd_data = analysis['raw_data']['macd_data']
-        recent_dates = prices_df.index[-len(macd_data['dif']):]
+        # 由于prices_df已经按日期正序排列，技术指标数据也是对应最后几条数据
+        recent_dates = prices_df.index[-len(macd_data['dif']):] if len(macd_data['dif']) <= len(prices_df) else prices_df.index
         
         fig.add_trace(
             go.Scatter(x=recent_dates, y=macd_data['dif'], name='DIF', line=dict(color='blue')),
@@ -608,7 +611,8 @@ def create_price_chart(prices_df, ticker, analysis):
     # RSI图
     if 'raw_data' in analysis and 'rsi_data' in analysis['raw_data']:
         rsi_data = analysis['raw_data']['rsi_data']
-        recent_dates = prices_df.index[-len(rsi_data):]
+        # 由于prices_df已经按日期正序排列，技术指标数据也是对应最后几条数据
+        recent_dates = prices_df.index[-len(rsi_data):] if len(rsi_data) <= len(prices_df) else prices_df.index
         
         fig.add_trace(
             go.Scatter(x=recent_dates, y=rsi_data, name='RSI', line=dict(color='purple')),

@@ -474,11 +474,11 @@ def prices_to_df(prices: list[Price]) -> pd.DataFrame:
     df = pd.DataFrame([p.model_dump() for p in prices])
     df["Date"] = pd.to_datetime(df["time"])
     df.set_index("Date", inplace=True)
-    numeric_cols = ["open", "close", "high", "low", "volume"]
+    numeric_cols = ["open", "high", "low", "close", "volume"]  # 保持正确的列顺序
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    # 保持数据按日期顺序排列（最新在前）
-    df.sort_index(ascending=False, inplace=True)
+    # 按日期正序排列（从旧到新），这是技术指标计算所必需的
+    df.sort_index(ascending=True, inplace=True)
     return df
 
 
