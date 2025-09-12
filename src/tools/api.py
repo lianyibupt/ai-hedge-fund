@@ -2,6 +2,17 @@ import os
 import pandas as pd
 from typing import Optional
 from .alphavantage_mcp import fetch_prices_from_alphavantage, fetch_financial_metrics_from_alphavantage, test_alphavantage_mcp_connection
+from .rapidapi_yahoo_finance_wrapper import (
+    fetch_prices_from_rapidapi_yahoo_mcp,
+    fetch_financial_metrics_from_rapidapi_yahoo_mcp,
+    test_rapidapi_yahoo_mcp_connection
+)
+from .rapidapi_yahoo_mcp import (
+    fetch_prices_from_rapidapi_yahoo,
+    fetch_financial_metrics_from_rapidapi_yahoo,
+    test_rapidapi_yahoo_connection,
+    get_personal_trading_data_rapidapi
+)
 import re
 
 from data.cache import get_cache
@@ -156,18 +167,26 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
         print(f"✅ {ticker} 数据完全命中缓存: {len(all_cached_prices)} 条")
         return all_cached_prices
     
-    # 3. 对缺失的日期范围请求API
+    # 3. 对缺失的日期范围请求API - 使用 RapidAPI 作为主要数据源
     new_prices = []
     for missing_start, missing_end in missing_ranges:
-        print(f"🔄 从 Alpha Vantage MCP 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
+        print(f"🔄 从 Yahoo Finance RapidAPI 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
         try:
-            range_prices = _fetch_prices_from_alphavantage(ticker, missing_start, missing_end, region)
+            range_prices = _fetch_prices_from_rapidapi_yahoo(ticker, missing_start, missing_end, region)
             if range_prices:
                 new_prices.extend(range_prices)
                 print(f"✅ 成功获取 {len(range_prices)} 条新数据")
         except Exception as e:
-            print(f"❌ 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
-            print(f"❌ 详细错误: {type(e).__name__}: {str(e)}")
+            print(f"❌ RapidAPI 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
+            print(f"🔄 尝试 Alpha Vantage 备用数据源...")
+            try:
+                range_prices = _fetch_prices_from_alphavantage(ticker, missing_start, missing_end, region)
+                if range_prices:
+                    new_prices.extend(range_prices)
+                    print(f"✅ Alpha Vantage 备用获取 {len(range_prices)} 条新数据")
+            except Exception as backup_e:
+                print(f"❌ Alpha Vantage 备用获取失败: {str(backup_e)}")
+                print(f"❌ 详细错误: {type(backup_e).__name__}: {str(backup_e)}")
             # 继续处理其他日期范围
             continue
     
@@ -545,6 +564,20 @@ def _fetch_financial_metrics_from_alphavantage(
         print(f"⚠️ Alpha Vantage 主要支持美股财务数据，{ticker} 市场区域 {region} 可能不支持")
     
     return fetch_financial_metrics_from_alphavantage(ticker, end_date, period, limit, region)
+
+
+def _fetch_prices_from_rapidapi_yahoo(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从 Yahoo Finance RapidAPI 服务获取价格数据
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
+    print(f"🚀 使用 Yahoo Finance RapidAPI 获取 {ticker} 价格数据 (市场: {region})")
+    
+    return fetch_prices_from_rapidapi_yahoo(ticker, start_date, end_date, region)
 
 
 
