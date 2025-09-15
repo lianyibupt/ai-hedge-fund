@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
@@ -540,8 +541,30 @@ def generate_trading_recommendation(analysis_result):
 
 def create_price_chart(prices_df, ticker, analysis):
     """
-    创建价格图表
+    创建价格图表，只显示有实际交易数据的日期
     """
+    # 严格的过滤条件，确保只显示有效交易数据
+    # 1. 成交量大于0
+    # 2. 价格数据有效（不为NaN或None）
+    # 3. 价格数据大于0
+    filtered_prices_df = prices_df[
+        (prices_df['volume'] > 0) & 
+        (prices_df['open'].notna()) & 
+        (prices_df['high'].notna()) & 
+        (prices_df['low'].notna()) & 
+        (prices_df['close'].notna()) &
+        (prices_df['open'] > 0) & 
+        (prices_df['high'] > 0) & 
+        (prices_df['low'] > 0) & 
+        (prices_df['close'] > 0)
+    ].copy()
+    
+    # 确保索引是日期类型并排序
+    if not filtered_prices_df.empty:
+        filtered_prices_df.index = pd.to_datetime(filtered_prices_df.index)
+        filtered_prices_df = filtered_prices_df.sort_index()
+    
+    # 创建子图
     fig = make_subplots(
         rows=4, cols=1,
         shared_xaxes=True,
@@ -550,93 +573,166 @@ def create_price_chart(prices_df, ticker, analysis):
         row_heights=[0.5, 0.2, 0.15, 0.15]
     )
     
-    # 主图：价格和布林带
-    fig.add_trace(
-        go.Candlestick(
-            x=prices_df.index,
-            open=prices_df['open'],
-            high=prices_df['high'],
-            low=prices_df['low'],
-            close=prices_df['close'],
-            name='价格'
-        ),
-        row=1, col=1
-    )
+    # 主图：价格和布林带（只在有数据时添加）
+    if not filtered_prices_df.empty:
+        # 添加K线图，只显示有交易的数据点
+        fig.add_trace(
+            go.Candlestick(
+                x=filtered_prices_df.index,
+                open=filtered_prices_df['open'],
+                high=filtered_prices_df['high'],
+                low=filtered_prices_df['low'],
+                close=filtered_prices_df['close'],
+                name='价格'
+            ),
+            row=1, col=1
+        )
+        
+        # 添加布林带（如果存在且有效）
+        if 'bollinger' in analysis.get('details', {}) and not filtered_prices_df.empty:
+            boll_details = analysis['details']['bollinger']
+            # 只有当布林带值有效时才添加水平线
+            if pd.notna(boll_details['current_upper']) and boll_details['current_upper'] > 0:
+                fig.add_hline(
+                    y=boll_details['current_upper'],
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="布林上轨",
+                    row=1, col=1
+                )
+            if pd.notna(boll_details['current_middle']) and boll_details['current_middle'] > 0:
+                fig.add_hline(
+                    y=boll_details['current_middle'],
+                    line_dash="dash", 
+                    line_color="blue",
+                    annotation_text="布林中轨",
+                    row=1, col=1
+                )
+            if pd.notna(boll_details['current_lower']) and boll_details['current_lower'] > 0:
+                fig.add_hline(
+                    y=boll_details['current_lower'],
+                    line_dash="dash",
+                    line_color="green", 
+                    annotation_text="布林下轨",
+                    row=1, col=1
+                )
     
-    # 计算布林带
-    if 'bollinger' in analysis['details']:
-        boll_details = analysis['details']['bollinger']
-        # 这里需要完整的布林带数据，简化处理
-        fig.add_hline(
-            y=boll_details['current_upper'],
-            line_dash="dash",
-            line_color="red",
-            annotation_text="布林上轨",
-            row=1, col=1
-        )
-        fig.add_hline(
-            y=boll_details['current_middle'],
-            line_dash="dash", 
-            line_color="blue",
-            annotation_text="布林中轨",
-            row=1, col=1
-        )
-        fig.add_hline(
-            y=boll_details['current_lower'],
-            line_dash="dash",
-            line_color="green", 
-            annotation_text="布林下轨",
-            row=1, col=1
-        )
-    
-    # MACD图
-    if 'raw_data' in analysis and 'macd_data' in analysis['raw_data']:
+    # MACD图（确保索引匹配且数据有效）
+    if 'raw_data' in analysis and 'macd_data' in analysis['raw_data'] and not filtered_prices_df.empty:
         macd_data = analysis['raw_data']['macd_data']
-        # 由于prices_df已经按日期正序排列，技术指标数据也是对应最后几条数据
-        recent_dates = prices_df.index[-len(macd_data['dif']):] if len(macd_data['dif']) <= len(prices_df) else prices_df.index
+        # 使用过滤后的价格数据索引，确保只显示有交易的数据点
+        macd_dates = filtered_prices_df.index
         
-        fig.add_trace(
-            go.Scatter(x=recent_dates, y=macd_data['dif'], name='DIF', line=dict(color='blue')),
-            row=2, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=recent_dates, y=macd_data['dea'], name='DEA', line=dict(color='red')),
-            row=2, col=1
-        )
-        fig.add_trace(
-            go.Bar(x=recent_dates, y=macd_data['macd'], name='MACD', marker_color='green'),
-            row=2, col=1
-        )
+        # 确保技术指标数据长度与价格数据匹配
+        if len(macd_data['dif']) > 0 and len(macd_data['dea']) > 0 and len(macd_data['macd']) > 0:
+            min_length = min(len(macd_data['dif']), len(macd_dates))
+            if min_length > 0:
+                # 取最近的数据点
+                recent_dates = macd_dates[-min_length:]
+                dif_data = macd_data['dif'][-min_length:]
+                dea_data = macd_data['dea'][-min_length:]
+                macd_bar_data = macd_data['macd'][-min_length:]
+                
+                # 过滤掉NaN值和无穷大值
+                valid_mask = [
+                    pd.notna(dif_data[i]) and pd.notna(dea_data[i]) and pd.notna(macd_bar_data[i]) and
+                    np.isfinite(dif_data[i]) and np.isfinite(dea_data[i]) and np.isfinite(macd_bar_data[i])
+                    for i in range(len(dif_data))
+                ]
+                
+                # 确保有足够的有效数据点
+                valid_count = sum(valid_mask)
+                if valid_count > 1:  # 至少需要2个数据点
+                    valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                    valid_dif = [dif_data[i] for i in range(len(dif_data)) if valid_mask[i]]
+                    valid_dea = [dea_data[i] for i in range(len(dea_data)) if valid_mask[i]]
+                    valid_macd = [macd_bar_data[i] for i in range(len(macd_bar_data)) if valid_mask[i]]
+                    
+                    # 添加MACD指标，只显示有交易的数据点
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_dif, 
+                                  name='DIF', line=dict(color='blue')),
+                        row=2, col=1
+                    )
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_dea, 
+                                  name='DEA', line=dict(color='red')),
+                        row=2, col=1
+                    )
+                    fig.add_trace(
+                        go.Bar(x=valid_dates, y=valid_macd, 
+                              name='MACD', marker_color='green'),
+                        row=2, col=1
+                    )
     
-    # RSI图
-    if 'raw_data' in analysis and 'rsi_data' in analysis['raw_data']:
+    # RSI图（确保索引匹配且数据有效）
+    if 'raw_data' in analysis and 'rsi_data' in analysis['raw_data'] and not filtered_prices_df.empty:
         rsi_data = analysis['raw_data']['rsi_data']
-        # 由于prices_df已经按日期正序排列，技术指标数据也是对应最后几条数据
-        recent_dates = prices_df.index[-len(rsi_data):] if len(rsi_data) <= len(prices_df) else prices_df.index
+        # 使用过滤后的价格数据索引，确保只显示有交易的数据点
+        rsi_dates = filtered_prices_df.index
         
+        # 确保技术指标数据长度与价格数据匹配
+        min_length = min(len(rsi_data), len(rsi_dates))
+        if min_length > 0:
+            # 取最近的数据点
+            recent_dates = rsi_dates[-min_length:]
+            rsi_values = rsi_data[-min_length:]
+            
+            # 过滤掉NaN值和无效值（0-100范围外的值）
+            valid_mask = [
+                pd.notna(x) and 0 <= x <= 100 and np.isfinite(x)
+                for x in rsi_values
+            ]
+            
+            # 确保有足够的有效数据点
+            valid_count = sum(valid_mask)
+            if valid_count > 1:  # 至少需要2个数据点
+                valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                valid_rsi = [rsi_values[i] for i in range(len(rsi_values)) if valid_mask[i]]
+                
+                # 添加RSI指标，只显示有交易的数据点
+                fig.add_trace(
+                    go.Scatter(x=valid_dates, y=valid_rsi, 
+                              name='RSI', line=dict(color='purple')),
+                    row=3, col=1
+                )
+                # 添加超买超卖线
+                fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="超买线", row=3, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="超卖线", row=3, col=1)
+    
+    # 成交量图（只显示有交易的日期）
+    if not filtered_prices_df.empty:
         fig.add_trace(
-            go.Scatter(x=recent_dates, y=rsi_data, name='RSI', line=dict(color='purple')),
-            row=3, col=1
+            go.Bar(
+                x=filtered_prices_df.index,
+                y=filtered_prices_df['volume'],
+                name='成交量',
+                marker_color='lightblue'
+            ),
+            row=4, col=1
         )
-        fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="超买线", row=3, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="超卖线", row=3, col=1)
     
-    # 成交量图
-    fig.add_trace(
-        go.Bar(
-            x=prices_df.index,
-            y=prices_df['volume'],
-            name='成交量',
-            marker_color='lightblue'
-        ),
-        row=4, col=1
-    )
-    
+    # 更新图表布局
     fig.update_layout(
         height=800,
         showlegend=True,
-        title_text=f"{ticker} 技术分析图表"
+        title_text=f"{ticker} 技术分析图表",
+        xaxis_rangeslider_visible=False,  # 隐藏范围滑块以减少混乱
     )
+    
+    # 更新Y轴标题
+    fig.update_yaxes(title_text="价格", row=1, col=1)
+    fig.update_yaxes(title_text="MACD", row=2, col=1)
+    fig.update_yaxes(title_text="RSI", row=3, col=1)
+    fig.update_yaxes(title_text="成交量", row=4, col=1)
+    
+    # 确保X轴只显示有数据的日期，使数值连续显示
+    if not filtered_prices_df.empty:
+        fig.update_xaxes(
+            type='date',
+            tickformat='%Y-%m-%d',
+            row=4, col=1
+        )
     
     return fig
 
