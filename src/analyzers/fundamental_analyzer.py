@@ -437,6 +437,78 @@ class FinnhubFundamentalAnalyzer:
         
         return AnalysisScore(score=min(score, 10), details=details)
     
+    def _analyze_growth_market_position(self, metrics: Dict[str, Any], profile: Dict[str, Any]) -> AnalysisScore:
+        """模块三：成长性与行业地位分析"""
+        score = 0
+        details = []
+        
+        # 1. 营收增长率（使用52周价格回报作为替代指标）
+        price_return_52w = metrics.get('52WeekPriceReturnDaily')
+        if price_return_52w:
+            # Finnhub 返回的是百分比形式
+            if price_return_52w > 50:  # >50%
+                score += 3
+                details.append(f"✓ 优秀价格增长: {price_return_52w:.1f}%")
+            elif price_return_52w > 20:  # 20-50%
+                score += 2
+                details.append(f"○ 良好价格增长: {price_return_52w:.1f}%")
+            elif price_return_52w > 0:  # 0-20%
+                score += 1
+                details.append(f"△ 一般价格增长: {price_return_52w:.1f}%")
+            else:
+                details.append(f"✗ 价格下跌: {price_return_52w:.1f}%")
+        else:
+            details.append("? 价格增长数据缺失")
+        
+        # 2. 市值增长潜力
+        market_cap = profile.get('marketCapitalization') or metrics.get('marketCapitalization')
+        if market_cap:
+            # 根据市值规模评估增长潜力
+            if market_cap < 2000:  # <20亿美元，小盘股增长潜力大
+                score += 3
+                details.append("✓ 小盘股，增长潜力大")
+            elif market_cap < 10000:  # 20-100亿美元，中盘股
+                score += 2
+                details.append("○ 中盘股，适度增长潜力")
+            else:  # >100亿美元，大盘股增长相对有限
+                score += 1
+                details.append("△ 大盘股，增长相对有限")
+        else:
+            details.append("? 市值数据缺失")
+        
+        # 3. 行业地位（通过市值相对排名）
+        industry = profile.get('finnhubIndustry', '').lower()
+        if industry and market_cap:
+            # 简化的行业地位评估
+            if 'technology' in industry or 'healthcare' in industry:
+                # 高科技和医疗行业增长潜力更大
+                score += 2
+                details.append(f"✓ 高增长行业: {industry}")
+            elif 'financial' in industry or 'consumer' in industry:
+                score += 1.5
+                details.append(f"○ 稳定增长行业: {industry}")
+            else:
+                score += 1
+                details.append(f"△ 传统行业: {industry}")
+        else:
+            details.append("? 行业信息缺失")
+        
+        # 4. 估值合理性（市销率）
+        ps_ratio = metrics.get('psQuarterly')
+        if ps_ratio:
+            if ps_ratio < 3:
+                score += 2
+                details.append(f"✓ 合理市销率: {ps_ratio:.1f}")
+            elif ps_ratio < 8:
+                score += 1
+                details.append(f"○ 中等市销率: {ps_ratio:.1f}")
+            else:
+                details.append(f"△ 较高市销率: {ps_ratio:.1f}")
+        else:
+            details.append("? 市销率数据缺失")
+        
+        return AnalysisScore(score=min(score, 10), details=details)
+    
     def _analyze_financial_risk(self, metrics: Dict[str, Any], company_type: CompanyType) -> AnalysisScore:
         """模块四：财务风险与可持续性分析"""
         score = 0

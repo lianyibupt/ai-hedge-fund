@@ -11,6 +11,8 @@ import sys
 import os
 import time
 import random
+import logging
+from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception
 
 # 添加src目录到Python路径
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -18,10 +20,67 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from data.models import Price, FinancialMetrics
 from data.cache import get_cache
 
+# 配置日志
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
 # 全局缓存实例
 _cache = get_cache()
 
+# 重试装饰器配置
+def retry_with_backoff(max_retries=3, initial_delay=1, backoff_factor=2):
+    """自定义重试装饰器，支持指数退避"""
+    def decorator(func):
+        def wrapper(*args, **kwargs):
+            retries = 0
+            while retries < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as e:
+                    retries += 1
+                    if retries >= max_retries:
+                        logger.error(f"函数 {func.__name__} 重试{max_retries}次后失败: {str(e)}")
+                        raise
+                    
+                    delay = initial_delay * (backoff_factor ** (retries - 1))
+                    logger.warning(f"函数 {func.__name__} 第{retries}次重试，等待{delay}秒后重试...")
+                    time.sleep(delay)
+            return func(*args, **kwargs)
+        return wrapper
+    return decorator
 
+# 判断是否为速率限制错误
+def _is_rate_limit_error(exception: Exception) -> bool:
+    """判断异常是否为API速率限制错误"""
+    error_msg = str(exception).lower()
+    error_type = type(exception).__name__
+    
+    rate_limit_indicators = [
+        'rate limit',
+        'too many requests',
+        '429',
+        'exceeded',
+        'quota',
+        'limit exceeded',
+        'yfratelimiterror'  # yfinance 特定的速率限制错误
+    ]
+    
+    # 检查错误类型是否为 YFRateLimitError
+    if error_type == 'YFRateLimitError':
+        return True
+        
+    # 检查错误消息中是否包含速率限制关键词
+    return any(indicator in error_msg for indicator in rate_limit_indicators)
+RETRY_ATTEMPTS = 3
+RETRY_WAIT_MIN = 2
+RETRY_WAIT_MAX = 10
+
+
+@retry(
+    stop=stop_after_attempt(RETRY_ATTEMPTS),
+    wait=wait_exponential(multiplier=1, min=RETRY_WAIT_MIN, max=RETRY_WAIT_MAX),
+    retry=retry_if_exception(_is_rate_limit_error)
+)
 def get_prices_yfinance(ticker: str, start_date: str, end_date: str) -> List[Price]:
     """
     从Yahoo Finance获取价格数据
@@ -35,10 +94,10 @@ def get_prices_yfinance(ticker: str, start_date: str, end_date: str) -> List[Pri
         Price对象列表
     """
     # 检查缓存
-    if cached_data := _cache.get_prices(ticker):
-        # 过滤缓存数据
-        filtered_data = [Price(**price) for price in cached_data if start_date <= price["time"] <= end_date]
+    if cached_data := _cache.get_prices(ticker, start_date, end_date):
+        filtered_data = [Price(**price) for price in cached_data]
         if filtered_data:
+            logger.info(f"从缓存获取{ticker}的{len(filtered_data)}条价格数据")
             return filtered_data
 
     try:
@@ -47,7 +106,7 @@ def get_prices_yfinance(ticker: str, start_date: str, end_date: str) -> List[Pri
         hist = stock.history(start=start_date, end=end_date, interval="1d")
         
         if hist.empty:
-            print(f"⚠️ 未获取到{ticker}的价格数据")
+            logger.warning(f"未获取到{ticker}的价格数据")
             return []
         
         prices = []
@@ -63,14 +122,18 @@ def get_prices_yfinance(ticker: str, start_date: str, end_date: str) -> List[Pri
         
         # 缓存结果
         _cache.set_prices(ticker, [p.model_dump() for p in prices])
-        print(f"✅ 成功获取{ticker}的{len(prices)}条价格数据")
+        logger.info(f"成功获取{ticker}的{len(prices)}条价格数据")
         return prices
         
     except Exception as e:
-        print(f"❌ 获取{ticker}价格数据失败: {str(e)}")
+        logger.error(f"获取{ticker}价格数据失败: {str(e)}")
+        if _is_rate_limit_error(e):
+            logger.warning("遇到API速率限制，将重试...")
+            raise  # 重新抛出异常以便重试
         return []
 
 
+@retry_with_backoff(max_retries=3, initial_delay=1, backoff_factor=2)
 def get_financial_metrics_yfinance(
     ticker: str,
     end_date: str,
@@ -217,6 +280,7 @@ def get_price_data_yfinance(ticker: str, start_date: str, end_date: str) -> pd.D
     return prices_to_df_yfinance(prices)
 
 
+@retry_with_backoff(max_retries=3, initial_delay=1, backoff_factor=2)
 def get_company_info_yfinance(ticker: str) -> dict:
     """获取公司基本信息"""
     try:
@@ -235,6 +299,7 @@ def get_company_info_yfinance(ticker: str) -> dict:
         return {}
 
 
+@retry_with_backoff(max_retries=3, initial_delay=1, backoff_factor=2)
 def test_yfinance_connection() -> bool:
     """测试yfinance连接"""
     try:
@@ -244,7 +309,10 @@ def test_yfinance_connection() -> bool:
         # 检查是否成功获取到数据
         return bool(info and len(info) > 10)  # 如果获取到足够的信息就认为成功
     except Exception as e:
-        print(f"测试连接失败: {e}")
+        logger.error(f"测试连接失败: {e}")
+        if _is_rate_limit_error(e):
+            logger.warning("遇到API速率限制，将重试...")
+            raise  # 重新抛出异常以便重试
         return False
 
 
