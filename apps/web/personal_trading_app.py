@@ -164,7 +164,6 @@ st.markdown("""
 # 主标题
 st.title("🎯 个性化交易分析系统")
 st.markdown("基于技术分析 + 基本面分析的综合投资决策系统")
-st.markdown("🔄 **数据源**: Alpha Vantage MCP 服务（美股实时数据）")
 
 
 # 智能缓存提示
@@ -561,7 +560,7 @@ def create_price_chart(prices_df, ticker, analysis):
     
     # 确保索引是日期类型并排序
     if not filtered_prices_df.empty:
-        filtered_prices_df.index = pd.to_datetime(filtered_prices_df.index)
+        filtered_prices_df.index = pd.to_datetime(filtered_prices_df.index, format='mixed', errors='coerce')
         filtered_prices_df = filtered_prices_df.sort_index()
     
     # 创建子图
@@ -988,7 +987,7 @@ def main():
                 if not history_df.empty:
                     # 格式化显示
                     display_df = history_df[['timestamp', 'tickers', 'start_date', 'end_date', 'result_count', 'avg_confidence']].copy()
-                    display_df['timestamp'] = pd.to_datetime(display_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
+                    display_df['timestamp'] = pd.to_datetime(display_df['timestamp'], format='mixed', errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
                     display_df['tickers'] = display_df['tickers'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
                     display_df.columns = ['查询时间', '股票代码', '开始日期', '结束日期', '结果数量', '平均信心度']
                     st.dataframe(display_df, use_container_width=True)

@@ -3,13 +3,13 @@ import pandas as pd
 from typing import Optional
 from .finnhub_financial_api import fetch_financial_metrics_from_finnhub, test_finnhub_financial_connection
 
-from .rapidapi_yahoo_mcp import (
+from .rapidapi_yahoo_finance import (
     fetch_prices_from_rapidapi_yahoo,
     fetch_financial_metrics_from_rapidapi_yahoo,
-    test_rapidapi_yahoo_connection,
-    get_personal_trading_data_rapidapi
+    test_rapidapi_yahoo_connection
 )
-from .yfinance_api import get_prices_yfinance, get_financial_metrics_yfinance
+from .rapidapi_yahoo_mcp import get_personal_trading_data_rapidapi
+from .akshare_api import get_prices_akshare, get_financial_metrics_akshare
 import re
 
 from data.cache import get_cache
@@ -72,7 +72,7 @@ def _detect_ticker_region(ticker: str) -> str:
     return 'us'
 
 
-def get_prices(ticker: str, start_date: str, end_date: str, region: str = None, api_source: str = "yfinance") -> list[Price]:
+def get_prices(ticker: str, start_date: str, end_date: str, region: str = None, api_source: str = "akshare") -> list[Price]:
     """Fetch price data with intelligent cache: analyze existing cache and request only missing dates.
     
     Args:
@@ -80,12 +80,12 @@ def get_prices(ticker: str, start_date: str, end_date: str, region: str = None, 
         start_date: 开始日期 (YYYY-MM-DD)
         end_date: 结束日期 (YYYY-MM-DD)
         region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
-        api_source: API数据源，可选 "yfinance" (默认) 或 "rapidapi"
+        api_source: API数据源，默认使用 "akshare"，备用 "rapidapi"
     """
     return _get_prices_intelligent_cache(ticker, start_date, end_date, region, api_source)
 
 
-def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, region: str = None, api_source: str = "yfinance") -> list[Price]:
+def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, region: str = None, api_source: str = "akshare") -> list[Price]:
     """
     智能缓存策略：分析已有缓存数据，只请求缺失的日期范围
     
@@ -165,61 +165,46 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
         print(f"✅ {ticker} 数据完全命中缓存: {len(all_cached_prices)} 条")
         return all_cached_prices
     
-    # 3. 对缺失的日期范围请求API - 根据api_source参数选择数据源
+    # 3. 对缺失的日期范围请求API - 默认使用AKShare作为主要数据源
     new_prices = []
     for missing_start, missing_end in missing_ranges:
-        if api_source == "yfinance":
-            print(f"🔄 从 Yahoo Finance API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
+        if api_source == "akshare":
+            print(f"🔄 从 AKShare API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
             try:
-                range_prices = _fetch_prices_from_yfinance(ticker, missing_start, missing_end, region)
+                range_prices = _fetch_prices_from_akshare(ticker, missing_start, missing_end, region)
                 if range_prices:
                     new_prices.extend(range_prices)
-                    print(f"✅ 成功获取 {len(range_prices)} 条新数据")
+                    print(f"✅ AKShare 成功获取 {len(range_prices)} 条新数据")
             except Exception as e:
-                error_msg = str(e).lower()
-                error_type = type(e).__name__
-                
-                # 检查是否为速率限制错误
-                is_rate_limit = ('rate limit' in error_msg or 
-                                'too many requests' in error_msg or 
-                                '429' in error_msg or
-                                'yfratelimiterror' in error_msg or
-                                error_type == 'YFRateLimitError')
-                
-                if is_rate_limit:
-                    print(f"⏰ Yahoo Finance API 速率限制，等待重试或稍后再试: {str(e)}")
-                    # 对于速率限制，不尝试备用API，直接抛出异常
-                    raise Exception(f"Yahoo Finance API 速率限制: {str(e)}")
-                else:
-                    print(f"❌ Yahoo Finance API 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
-                    print(f"🔄 尝试 RapidAPI 备用数据源...")
-                    try:
-                        range_prices = _fetch_prices_from_rapidapi_yahoo(ticker, missing_start, missing_end, region)
-                        if range_prices:
-                            new_prices.extend(range_prices)
-                            print(f"✅ RapidAPI 备用获取 {len(range_prices)} 条新数据")
-                    except Exception as backup_e:
-                        print(f"❌ RapidAPI 备用获取失败: {str(backup_e)}")
-                        print(f"❌ 详细错误: {type(backup_e).__name__}: {str(backup_e)}")
+                print(f"❌ AKShare API 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
+                print(f"🔄 尝试 RapidAPI Yahoo Finance 备用数据源...")
+                try:
+                    range_prices = _fetch_prices_from_rapidapi_yahoo(ticker, missing_start, missing_end, region)
+                    if range_prices:
+                        new_prices.extend(range_prices)
+                        print(f"✅ RapidAPI 备用获取 {len(range_prices)} 条新数据")
+                except Exception as backup_e:
+                    print(f"❌ RapidAPI 备用获取失败: {str(backup_e)}")
+                    print(f"❌ 详细错误: {type(backup_e).__name__}: {str(backup_e)}")
                     # 继续处理其他日期范围
                     continue
         else:
-            print(f"🔄 从 Yahoo Finance RapidAPI 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
+            print(f"🔄 从 RapidAPI Yahoo Finance 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
             try:
                 range_prices = _fetch_prices_from_rapidapi_yahoo(ticker, missing_start, missing_end, region)
                 if range_prices:
                     new_prices.extend(range_prices)
-                    print(f"✅ 成功获取 {len(range_prices)} 条新数据")
+                    print(f"✅ RapidAPI 成功获取 {len(range_prices)} 条新数据")
             except Exception as e:
                 print(f"❌ RapidAPI 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
-                print(f"🔄 尝试 Yahoo Finance API 备用数据源...")
+                print(f"🔄 尝试 AKShare 备用数据源...")
                 try:
-                    range_prices = _fetch_prices_from_yfinance(ticker, missing_start, missing_end, region)
+                    range_prices = _fetch_prices_from_akshare(ticker, missing_start, missing_end, region)
                     if range_prices:
                         new_prices.extend(range_prices)
-                        print(f"✅ Yahoo Finance API 备用获取 {len(range_prices)} 条新数据")
+                        print(f"✅ AKShare 备用获取 {len(range_prices)} 条新数据")
                 except Exception as backup_e:
-                    print(f"❌ Yahoo Finance API 备用获取失败: {str(backup_e)}")
+                    print(f"❌ AKShare 备用获取失败: {str(backup_e)}")
                     print(f"❌ 详细错误: {type(backup_e).__name__}: {str(backup_e)}")
                 # 继续处理其他日期范围
                 continue
@@ -332,7 +317,7 @@ def get_financial_metrics(
     period: str = "ttm",
     limit: int = 10,
     region: str = None,
-    api_source: str = "yfinance"
+    api_source: str = "akshare"
 ) -> list[FinancialMetrics]:
     """Fetch financial metrics with multi-level cache: memory -> SQLite -> iTick API.
     
@@ -342,7 +327,7 @@ def get_financial_metrics(
         period: 报告期间
         limit: 数据限制
         region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
-        api_source: API数据源，可选 "yfinance" (默认) 或 "finnhub"
+        api_source: API数据源，可选 "akshare" (默认) 或 "finnhub"
     """
     # 如果没有提供region，则自动检测
     if region is None:
@@ -371,16 +356,16 @@ def get_financial_metrics(
     except Exception as e:
         print(f"⚠️ SQLite财务缓存读取失败: {str(e)}")
 
-    # 第三级：根据api_source选择API获取数据
-    if api_source == "yfinance":
-        print(f"🔄 从 Yahoo Finance API 获取 {ticker} 的财务指标...")
+    # 第三级：默认使用AKShare作为主要数据源获取财务指标
+    if api_source == "akshare":
+        print(f"🔄 从 AKShare API 获取 {ticker} 的财务指标...")
         try:
-            metrics = _fetch_financial_metrics_from_yfinance(ticker, end_date, period, limit, region)
+            metrics = _fetch_financial_metrics_from_akshare(ticker, end_date, period, limit, region)
             
             if not metrics:
-                raise Exception(f"Yahoo Finance API 返回空财务数据，股票代码: {ticker}")
+                raise Exception(f"AKShare API 返回空财务数据，股票代码: {ticker}")
                 
-            print(f"✅ 成功从 Yahoo Finance API 获取到财务指标")
+            print(f"✅ 成功从 AKShare API 获取到财务指标")
             
             # 存储到双级缓存
             metric_dicts = [m.model_dump() for m in metrics]
@@ -395,7 +380,7 @@ def get_financial_metrics(
             return metrics
             
         except Exception as e:
-            print(f"❌ Yahoo Finance API 获取财务指标失败: {str(e)}")
+            print(f"❌ AKShare API 获取财务指标失败: {str(e)}")
             print(f"🔄 尝试 Finnhub API 备用数据源...")
             try:
                 metrics = _fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
@@ -419,7 +404,7 @@ def get_financial_metrics(
                 
             except Exception as backup_e:
                 print(f"❌ Finnhub API 备用获取失败: {str(backup_e)}")
-                raise Exception(f"无法从 Yahoo Finance API 或 Finnhub API 获取 {ticker} 的财务指标: {str(backup_e)}")
+                raise Exception(f"无法从 AKShare API 或 Finnhub API 获取 {ticker} 的财务指标: {str(backup_e)}")
     else:
         print(f"🔄 从 Finnhub API 获取 {ticker} 的财务指标...")
         try:
@@ -444,14 +429,14 @@ def get_financial_metrics(
             
         except Exception as e:
             print(f"❌ Finnhub API 获取财务指标失败: {str(e)}")
-            print(f"🔄 尝试 Yahoo Finance API 备用数据源...")
+            print(f"🔄 尝试 AKShare API 备用数据源...")
             try:
-                metrics = _fetch_financial_metrics_from_yfinance(ticker, end_date, period, limit, region)
+                metrics = _fetch_financial_metrics_from_akshare(ticker, end_date, period, limit, region)
                 
                 if not metrics:
-                    raise Exception(f"Yahoo Finance API 返回空财务数据，股票代码: {ticker}")
+                    raise Exception(f"AKShare API 返回空财务数据，股票代码: {ticker}")
                     
-                print(f"✅ 成功从 Yahoo Finance API 获取到财务指标")
+                print(f"✅ 成功从 AKShare API 获取到财务指标")
                 
                 # 存储到双级缓存
                 metric_dicts = [m.model_dump() for m in metrics]
@@ -466,8 +451,8 @@ def get_financial_metrics(
                 return metrics
                 
             except Exception as backup_e:
-                print(f"❌ Yahoo Finance API 备用获取失败: {str(backup_e)}")
-                raise Exception(f"无法从 Finnhub API 或 Yahoo Finance API 获取 {ticker} 的财务指标: {str(backup_e)}")
+                print(f"❌ AKShare API 备用获取失败: {str(backup_e)}")
+                raise Exception(f"无法从 Finnhub API 或 AKShare API 获取 {ticker} 的财务指标: {str(backup_e)}")
 
 
 
@@ -651,14 +636,14 @@ def _fetch_prices_from_alphavantage(ticker: str, start_date: str, end_date: str,
 
 
 
-def _fetch_financial_metrics_from_yfinance(
+def _fetch_financial_metrics_from_akshare(
     ticker: str,
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
     region: str = 'us',
 ) -> list[FinancialMetrics]:
-    """从 Yahoo Finance API 获取财务指标
+    """从 AKShare API 获取财务指标
     
     Args:
         ticker: 股票代码
@@ -667,9 +652,9 @@ def _fetch_financial_metrics_from_yfinance(
         limit: 数据限制
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    print(f"🚀 使用 Yahoo Finance API 获取 {ticker} 财务指标 (市场: {region})")
+    print(f"🚀 使用 AKShare API 获取 {ticker} 财务指标 (市场: {region})")
     
-    return get_financial_metrics_yfinance(ticker, end_date, period, limit)
+    return get_financial_metrics_akshare(ticker, end_date, period, limit)
 
 
 def _fetch_financial_metrics_from_finnhub(
@@ -695,8 +680,8 @@ def _fetch_financial_metrics_from_finnhub(
     return fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
 
 
-def _fetch_prices_from_yfinance(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
-    """从 Yahoo Finance API 获取价格数据
+def _fetch_prices_from_akshare(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从 AKShare API 获取价格数据
     
     Args:
         ticker: 股票代码
@@ -704,9 +689,9 @@ def _fetch_prices_from_yfinance(ticker: str, start_date: str, end_date: str, reg
         end_date: 结束日期
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    print(f"🚀 使用 Yahoo Finance API 获取 {ticker} 价格数据 (市场: {region})")
+    print(f"🚀 使用 AKShare API 获取 {ticker} 价格数据 (市场: {region})")
     
-    return get_prices_yfinance(ticker, start_date, end_date)
+    return get_prices_akshare(ticker, start_date, end_date)
 
 
 def _fetch_prices_from_rapidapi_yahoo(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
