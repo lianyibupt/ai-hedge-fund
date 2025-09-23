@@ -29,6 +29,8 @@ def warren_buffett_agent(state: AgentState):
         progress.update_status("warren_buffett_agent", ticker, "Fetching financial metrics")
         # Fetch required data
         metrics = get_financial_metrics(ticker, end_date, period="ttm", limit=5)
+        if not metrics:
+            return {"error": f"无法获取 {ticker} 的财务数据，请检查股票代码或数据源"}
 
         progress.update_status("warren_buffett_agent", ticker, "Gathering financial line items")
         financial_line_items = search_line_items(

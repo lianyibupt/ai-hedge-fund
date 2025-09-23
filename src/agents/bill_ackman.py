@@ -31,6 +31,16 @@ def bill_ackman_agent(state: AgentState):
         progress.update_status("bill_ackman_agent", ticker, "Fetching financial metrics")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=5)
         
+        # 数据验证：检查是否获取到财务指标数据
+        if not metrics:
+            progress.update_status("bill_ackman_agent", ticker, "No financial metrics data available")
+            ackman_analysis[ticker] = {
+                "signal": "neutral",
+                "confidence": 0.0,
+                "reasoning": "无法获取财务指标数据，无法进行分析"
+            }
+            continue
+        
         progress.update_status("bill_ackman_agent", ticker, "Gathering financial line items")
         # Request multiple periods of data (annual or TTM) for a more robust long-term view.
         financial_line_items = search_line_items(
@@ -50,8 +60,28 @@ def bill_ackman_agent(state: AgentState):
             limit=5           # fetch up to 5 annual periods (or more if needed)
         )
         
+        # 数据验证：检查是否获取到财务项目数据
+        if not financial_line_items:
+            progress.update_status("bill_ackman_agent", ticker, "No financial line items data available")
+            ackman_analysis[ticker] = {
+                "signal": "neutral",
+                "confidence": 0.0,
+                "reasoning": "无法获取财务项目数据，无法进行分析"
+            }
+            continue
+        
         progress.update_status("bill_ackman_agent", ticker, "Getting market cap")
         market_cap = get_market_cap(ticker, end_date)
+        
+        # 数据验证：检查是否获取到市值数据
+        if market_cap is None:
+            progress.update_status("bill_ackman_agent", ticker, "No market cap data available")
+            ackman_analysis[ticker] = {
+                "signal": "neutral",
+                "confidence": 0.0,
+                "reasoning": "无法获取市值数据，无法进行估值分析"
+            }
+            continue
         
         progress.update_status("bill_ackman_agent", ticker, "Analyzing business quality")
         quality_analysis = analyze_business_quality(metrics, financial_line_items)

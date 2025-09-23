@@ -27,22 +27,32 @@ def sentiment_agent(state: AgentState):
             end_date=end_date,
             limit=1000,
         )
+        
+        # 记录获取到的内部交易数据
+        print(f"📊 Sentiment Agent - {ticker}: 获取到 {len(insider_trades)} 条内部交易数据")
 
         progress.update_status("sentiment_agent", ticker, "Analyzing trading patterns")
 
         # Get the signals from the insider trades
         transaction_shares = pd.Series([t.transaction_shares for t in insider_trades]).dropna()
         insider_signals = np.where(transaction_shares < 0, "bearish", "bullish").tolist()
+        
+        print(f"📊 Sentiment Agent - {ticker}: 内部交易信号数量: {len(insider_signals)}")
 
         progress.update_status("sentiment_agent", ticker, "Fetching company news")
 
         # Get the company news
         company_news = get_company_news(ticker, end_date, limit=100)
+        
+        # 记录获取到的新闻数据
+        print(f"📊 Sentiment Agent - {ticker}: 获取到 {len(company_news)} 条公司新闻数据")
 
         # Get the sentiment from the company news
         sentiment = pd.Series([n.sentiment for n in company_news]).dropna()
         news_signals = np.where(sentiment == "negative", "bearish", 
                               np.where(sentiment == "positive", "bullish", "neutral")).tolist()
+        
+        print(f"📊 Sentiment Agent - {ticker}: 新闻情感信号数量: {len(news_signals)}")
         
         progress.update_status("sentiment_agent", ticker, "Combining signals")
         # Combine signals from both sources with weights

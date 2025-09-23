@@ -112,15 +112,37 @@ def get_prices_akshare(ticker: str, start_date: str, end_date: str) -> List[Pric
             df = ak.stock_hk_hist(symbol=formatted_symbol, period="daily", 
                                  start_date=start_date, end_date=end_date, adjust="qfq")
         elif market == 'us':
-            # 美股数据
-            df = ak.stock_us_daily(symbol=formatted_symbol)
-            # 过滤日期范围
-            if df is not None and not df.empty:
-                df['date'] = pd.to_datetime(df['date'], format='mixed', errors='coerce')
-                start_dt = pd.to_datetime(start_date, format='mixed', errors='coerce')
-                end_dt = pd.to_datetime(end_date, format='mixed', errors='coerce')
-                mask = (df['date'] >= start_dt) & (df['date'] <= end_dt)
-                df = df.loc[mask]
+            # 美股数据 - 主要使用yfinance获取历史数据
+            try:
+                import yfinance as yf
+                yf_ticker = yf.Ticker(formatted_symbol)
+                
+                # 获取历史数据
+                hist = yf_ticker.history(start=start_date, end=end_date)
+                
+                if hist is not None and not hist.empty:
+                    prices = []
+                    for date, row in hist.iterrows():
+                        prices.append(Price(
+                            open=round(float(row['Open']), 2),
+                            close=round(float(row['Close']), 2),
+                            high=round(float(row['High']), 2),
+                            low=round(float(row['Low']), 2),
+                            volume=int(row['Volume']),
+                            time=date.strftime("%Y-%m-%d")
+                        ))
+                    logger.info(f"使用yfinance成功获取{ticker}的{len(prices)}条价格数据")
+                    return prices
+                else:
+                    logger.warning(f"yfinance未返回{ticker}的历史数据")
+                    return []
+                    
+            except ImportError:
+                logger.error("yfinance未安装，无法获取美股数据")
+                return []
+            except Exception as yf_error:
+                logger.error(f"yfinance获取{ticker}数据失败: {str(yf_error)}")
+                return []
         else:
             logger.warning(f"不支持的股票代码格式: {ticker}")
             return []

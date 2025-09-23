@@ -92,7 +92,7 @@ with gr.Blocks(title="AI对冲基金交易系统") as demo:
             tickers = gr.Textbox(
                 label="股票代码(逗号分隔)",
                 placeholder="例如: AAPL,MSFT,GOOG",
-                value="AAPL,MSFT,GOOG"
+                value="RXRX,CRWV,SBET,CRCL"
             )
             start_date = gr.Textbox(
                 label="开始日期(YYYY-MM-DD)",

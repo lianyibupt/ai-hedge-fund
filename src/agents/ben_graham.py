@@ -35,6 +35,8 @@ def ben_graham_agent(state: AgentState):
     for ticker in tickers:
         progress.update_status("ben_graham_agent", ticker, "Fetching financial metrics")
         metrics = get_financial_metrics(ticker, end_date, period="annual", limit=10)
+        if not metrics:
+            return {"error": f"无法获取 {ticker} 的财务数据，请检查股票代码或数据源"}
 
         progress.update_status("ben_graham_agent", ticker, "Gathering financial line items")
         financial_line_items = search_line_items(ticker, ["earnings_per_share", "revenue", "net_income", "book_value_per_share", "total_assets", "total_liabilities", "current_assets", "current_liabilities", "dividends_and_other_cash_distributions", "outstanding_shares"], end_date, period="annual", limit=10)

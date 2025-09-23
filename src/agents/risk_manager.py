@@ -26,22 +26,46 @@ def risk_management_agent(state: AgentState):
         )
 
         if not prices:
-            progress.update_status("risk_management_agent", ticker, "Failed: No price data found")
-            continue
-
-        prices_df = prices_to_df(prices)
+            progress.update_status("risk_management_agent", ticker, "Failed: No price data found, using default price")
+            # 使用默认价格而不是跳过，避免影响后续分析
+            current_price = 1.0  # 默认价格
+            current_prices[ticker] = current_price
+            progress.update_status("risk_management_agent", ticker, f"Using default price: {current_price}")
+        else:
+            prices_df = prices_to_df(prices)
+            current_price = prices_df["close"].iloc[0]  # 使用iloc[0]获取最新价格
+            current_prices[ticker] = current_price  # Store the current price
+            progress.update_status("risk_management_agent", ticker, f"Current price: {current_price}")
 
         progress.update_status("risk_management_agent", ticker, "Calculating position limits")
 
-        # Calculate portfolio value
-        current_price = prices_df["close"].iloc[0]  # 使用iloc[0]获取最新价格
-        current_prices[ticker] = current_price  # Store the current price
+        # 确保current_price变量存在
+        current_price = current_prices[ticker]
 
         # Calculate current position value for this ticker
-        current_position_value = portfolio.get("cost_basis", {}).get(ticker, 0)
+        positions = portfolio.get("positions", {})
+        current_position = positions.get(ticker, {})
+        
+        # Calculate long position value
+        long_shares = current_position.get("long", 0)
+        long_cost_basis = current_position.get("long_cost_basis", 0.0)
+        long_value = long_shares * current_price if long_shares > 0 else 0
+        
+        # Calculate short position value (short positions are liabilities)
+        short_shares = current_position.get("short", 0)
+        short_cost_basis = current_position.get("short_cost_basis", 0.0)
+        short_value = short_shares * current_price if short_shares > 0 else 0
+        
+        # Total position value (long positions are assets, short positions are liabilities)
+        current_position_value = long_value - short_value
 
-        # Calculate total portfolio value using stored prices
-        total_portfolio_value = portfolio.get("cash", 0) + sum(portfolio.get("cost_basis", {}).get(t, 0) for t in portfolio.get("cost_basis", {}))
+        # Calculate total portfolio value (cash + long positions - short positions)
+        total_portfolio_value = portfolio.get("cash", 0)
+        for t, pos in positions.items():
+            t_price = current_prices.get(t, 0) if t == ticker else 0  # Use current price for this ticker, 0 for others (will be updated later)
+            long_val = pos.get("long", 0) * t_price
+            short_val = pos.get("short", 0) * t_price
+            total_portfolio_value += long_val - short_val
 
         # Base limit is 20% of portfolio for any single position
         position_limit = total_portfolio_value * 0.20

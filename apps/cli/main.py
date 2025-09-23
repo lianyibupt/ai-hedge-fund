@@ -76,7 +76,9 @@ def run_hedge_fund(
             workflow = create_workflow(selected_analysts)
             agent = workflow.compile()
         else:
-            agent = app
+            # Create default workflow with all analysts
+            workflow = create_workflow()
+            agent = workflow.compile()
 
         final_state = agent.invoke(
             {

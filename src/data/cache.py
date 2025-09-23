@@ -29,7 +29,8 @@ class Cache:
         cache_time = self._cache_timestamps[cache_key]
         now = datetime.now()
         age_hours = (now - cache_time).total_seconds() / 3600
-        return age_hours < max_age_hours
+        is_fresh = age_hours < max_age_hours
+        return is_fresh
     
     def _update_cache_timestamp(self, cache_key: str):
         """更新缓存时间戳"""
@@ -296,24 +297,28 @@ class Cache:
     
     def get_cache_stats(self) -> Dict[str, Any]:
         """获取缓存统计信息"""
+        # 清理过期缓存
+        expired_count = self.clear_expired_cache()
+        
         stats = {
             'cache_summary': {
                 'total_tickers': len(set(
-                    list(self._prices_cache.keys()) + 
-                    list(self._financial_metrics_cache.keys()) + 
-                    list(self._line_items_cache.keys()) + 
-                    list(self._insider_trades_cache.keys()) + 
+                    list(self._prices_cache.keys()) +
+                    list(self._financial_metrics_cache.keys()) +
+                    list(self._line_items_cache.keys()) +
+                    list(self._insider_trades_cache.keys()) +
                     list(self._company_news_cache.keys())
                 )),
                 'total_cache_entries': len(self._cache_timestamps),
-                'fresh_entries': sum(1 for key in self._cache_timestamps if self._is_cache_fresh(key, 24))
+                'fresh_entries': sum(1 for key in self._cache_timestamps if self._is_cache_fresh(key, 24)),
+                'expired_entries_cleared': expired_count
             },
             'price_cache': {
                 'tickers_count': len(self._prices_cache),
                 'total_date_entries': sum(len(dates) for dates in self._prices_cache.values()),
                 'fresh_entries': sum(
-                    1 for ticker, dates in self._prices_cache.items() 
-                    for date_key in dates 
+                    1 for ticker, dates in self._prices_cache.items()
+                    for date_key in dates
                     if self._is_cache_fresh(f"{ticker}_{date_key}", 24)
                 )
             },
@@ -321,8 +326,8 @@ class Cache:
                 'tickers_count': len(self._financial_metrics_cache),
                 'total_period_entries': sum(len(periods) for periods in self._financial_metrics_cache.values()),
                 'fresh_entries': sum(
-                    1 for ticker, periods in self._financial_metrics_cache.items() 
-                    for period_key in periods 
+                    1 for ticker, periods in self._financial_metrics_cache.items()
+                    for period_key in periods
                     if self._is_cache_fresh(f"{ticker}_financial_{period_key}", 24*7)
                 )
             },
@@ -330,6 +335,10 @@ class Cache:
                 'insider_trades': len(self._insider_trades_cache),
                 'company_news': len(self._company_news_cache),
                 'line_items': len(self._line_items_cache)
+            },
+            'cache_timestamps_info': {
+                'total_timestamps': len(self._cache_timestamps),
+                'sample_timestamps': dict(list(self._cache_timestamps.items())[:5])  # 显示前5个时间戳作为样本
             }
         }
         return stats
