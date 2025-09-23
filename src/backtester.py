@@ -1,8 +1,6 @@
 import sys
 
-from datetime import datetime, timedelta
-from dateutil.relativedelta import relativedelta
-import questionary
+from colorama import Fore, Style
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -23,7 +21,6 @@ from tools.api import (
 from utils.display import print_backtest_results, format_backtest_row
 from typing_extensions import Callable
 
-init(autoreset=True)
 
 
 class Backtester:
@@ -742,7 +739,7 @@ if __name__ == "__main__":
             print(f"\nSelected model: {Fore.GREEN + Style.BRIGHT}{model_choice}{Style.RESET_ALL}\n")
 
     # Create and run the backtester
-    backtester = Backtester(
+    backtester = BacktestEngine(
         agent=run_hedge_fund,
         tickers=tickers,
         start_date=args.start_date,
@@ -754,5 +751,5 @@ if __name__ == "__main__":
         initial_margin_requirement=args.margin_requirement,
     )
 
-    performance_metrics = backtester.run_backtest()
-    performance_df = backtester.analyze_performance()
+    # Run the backtest with graceful exit handling
+    performance_metrics = run_backtest(backtester)

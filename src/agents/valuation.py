@@ -30,6 +30,56 @@ def valuation_agent(state: AgentState):
         if not financial_metrics:
             progress.update_status("valuation_agent", ticker, "Failed: No financial metrics found")
             continue
+        most_recent_metrics = financial_metrics[0]
+
+        # --- Enhanced line‑items ---
+        progress.update_status(agent_id, ticker, "Gathering comprehensive line items")
+        line_items = search_line_items(
+            ticker=ticker,
+            line_items=[
+                "free_cash_flow",
+                "net_income",
+                "depreciation_and_amortization",
+                "capital_expenditure",
+                "working_capital",
+                "total_debt",
+                "cash_and_equivalents", 
+                "interest_expense",
+                "revenue",
+                "operating_income",
+                "ebit",
+                "ebitda"
+            ],
+            end_date=end_date,
+            period="ttm",
+            limit=8,
+            api_key=api_key,
+        )
+        if len(line_items) < 2:
+            progress.update_status(agent_id, ticker, "Failed: Insufficient financial line items")
+            continue
+        li_curr, li_prev = line_items[0], line_items[1]
+
+        # ------------------------------------------------------------------
+        # Valuation models
+        # ------------------------------------------------------------------
+        # Handle potential None values for working capital
+        if li_curr.working_capital is not None and li_prev.working_capital is not None:
+            wc_change = li_curr.working_capital - li_prev.working_capital
+        else:
+            wc_change = 0  # Default to 0 if working capital data is unavailable
+
+        # Owner Earnings
+        owner_val = calculate_owner_earnings_value(
+            net_income=li_curr.net_income,
+            depreciation=li_curr.depreciation_and_amortization,
+            capex=li_curr.capital_expenditure,
+            working_capital_change=wc_change,
+            growth_rate=most_recent_metrics.earnings_growth or 0.05,
+        )
+
+        # Enhanced Discounted Cash Flow with WACC and scenarios
+        progress.update_status(agent_id, ticker, "Calculating WACC and enhanced DCF")
         
         metrics = financial_metrics[0]
 
