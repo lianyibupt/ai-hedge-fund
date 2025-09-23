@@ -81,7 +81,7 @@ def run_hedge_fund_interface(
         "交易决策": result["decisions"],
         "分析师信号": result["analyst_signals"]
     }
-    return json.dumps(output, indent=2, ensure_ascii=False)
+    return output
 
 # 创建界面
 with gr.Blocks(title="AI对冲基金交易系统") as demo:

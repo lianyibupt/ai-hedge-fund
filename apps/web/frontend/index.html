@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="business">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎯 个性化交易分析系统 - DaisyUI版</title>
+    <link href="https://cdn.jsdelivr.net/npm/daisyui@4.12.10/dist/full.min.css" rel="stylesheet" type="text/css" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+    <style>
+        .bullish { color: #00c851; font-weight: bold; }
+        .bearish { color: #ff4444; font-weight: bold; }
+        .neutral { color: #ffbb33; font-weight: bold; }
+        .metric-card { background-color: #1f2937; border-left: 4px solid #3b82f6; }
+        .loading-spinner { border-top-color: #3b82f6; }
+    </style>
+</head>
+<body class="min-h-screen bg-base-200">
+    <!-- 导航栏 -->
+    <div class="navbar bg-base-100 shadow-lg">
+        <div class="navbar-start">
+            <div class="dropdown">
+                <div tabindex="0" role="button" class="btn btn-ghost lg:hidden">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h8m-8 6h16" />
+                    </svg>
+                </div>
+                <ul tabindex="0" class="menu menu-sm dropdown-content bg-base-100 rounded-box z-1 mt-3 w-52 p-2 shadow">
+                    <li><a href="#analysis">分析面板</a></li>
+                    <li><a href="#settings">设置</a></li>
+                    <li><a href="#cache">缓存管理</a></li>
+                </ul>
+            </div>
+            <a class="btn btn-ghost text-xl">🎯 交易分析系统</a>
+        </div>
+        <div class="navbar-center hidden lg:flex">
+            <ul class="menu menu-horizontal px-1">
+                <li><a href="#analysis">分析面板</a></li>
+                <li><a href="#settings">参数设置</a></li>
+                <li><a href="#cache">缓存管理</a></li>
+            </ul>
+        </div>
+        <div class="navbar-end">
+            <div class="badge badge-primary badge-outline">DaisyUI v4</div>
+        </div>
+    </div>
+
+    <!-- 主内容区域 -->
+    <div class="container mx-auto p-4">
+        <!-- 标题区域 -->
+        <div class="hero bg-base-100 rounded-lg shadow-md mb-6">
+            <div class="hero-content text-center">
+                <div class="max-w-2xl">
+                    <h1 class="text-5xl font-bold">🎯 个性化交易分析系统</h1>
+                    <p class="py-6 text-lg">基于技术分析 + 基本面分析的综合投资决策系统</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- 参数设置卡片 -->
+        <div id="settings" class="card bg-base-100 shadow-xl mb-6">
+            <div class="card-body">
+                <h2 class="card-title">📊 分析参数设置</h2>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <!-- 股票代码输入 -->
+                    <div class="form-control">
+                        <label class="label">
+                            <span class="label-text">股票代码 (逗号分隔)</span>
+                        </label>
+                        <input type="text" id="tickersInput" placeholder="AAPL,MSFT,GOOGL" 
+                               class="input input-bordered" value="RXRX,CRWV,SBET,CRCL,NBIS">
+                        <label class="label">
+                            <span class="label-text-alt">输入要分析的股票代码，多个代码用逗号分隔</span>
+                        </label>
+                    </div>
+
+                    <!-- 日期范围 -->
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">开始日期</span>
+                            </label>
+                            <input type="date" id="startDate" class="input input-bordered">
+                        </div>
+                        <div class="form-control">
+                            <label class="label">
+                                <span class="label-text">结束日期</span>
+                            </label>
+                            <input type="date" id="endDate" class="input input-bordered">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 分析选项 -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-4">
+                    <label class="label cursor-pointer">
+                        <span class="label-text">启用基本面分析</span> 
+                        <input type="checkbox" id="enableFundamental" checked="checked" class="checkbox checkbox-primary">
+                    </label>
+                    <label class="label cursor-pointer">
+                        <span class="label-text">显示详细指标</span> 
+                        <input type="checkbox" id="showDetailed" class="checkbox checkbox-primary">
+                    </label>
+                    <label class="label cursor-pointer">
+                        <span class="label-text">显示历史数据</span> 
+                        <input type="checkbox" id="showHistorical" class="checkbox checkbox-primary">
+                    </label>
+                    <label class="label cursor-pointer">
+                        <span class="label-text">自动刷新</span> 
+                        <input type="checkbox" id="autoRefresh" class="checkbox checkbox-primary">
+                    </label>
+                </div>
+
+                <!-- 操作按钮 -->
+                <div class="card-actions justify-end mt-4">
+                    <button id="analyzeBtn" class="btn btn-primary">
+                        🚀 开始分析
+                    </button>
+                    <button id="clearCacheBtn" class="btn btn-secondary">
+                        🗑️ 清理缓存
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 分析结果区域 -->
+        <div id="analysisResults" class="space-y-6">
+            <!-- 结果将动态插入到这里 -->
+        </div>
+
+        <!-- 加载状态 -->
+        <div id="loading" class="hidden fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
+            <div class="bg-base-100 p-8 rounded-lg text-center">
+                <div class="loading loading-spinner loading-lg text-primary mb-4"></div>
+                <p class="text-lg">分析中，请稍候...</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 智能缓存说明模态框 -->
+    <div id="cacheInfoModal" class="modal">
+        <div class="modal-box">
+            <h3 class="font-bold text-lg">💡 智能缓存策略说明</h3>
+            <div class="py-4">
+                <div class="space-y-2">
+                    <div class="flex items-center gap-2">
+                        <div class="badge badge-primary">🔹</div>
+                        <span>同日查询优化</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="badge badge-primary">🔹</div>
+                        <span>跨日智能更新</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="badge badge-primary">🔹</div>
+                        <span>缓存命中率显示</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="badge badge-primary">🔹</div>
+                        <span>多级缓存架构</span>
+                    </div>
+                    <div class="flex items-center gap-2">
+                        <div class="badge badge-primary">🔹</div>
+                        <span>纯美股数据支持</span>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-action">
+                <button class="btn" onclick="document.getElementById('cacheInfoModal').close()">关闭</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/app.js"></script>
+</body>
+</html>

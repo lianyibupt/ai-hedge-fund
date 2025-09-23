@@ -131,8 +131,8 @@ def calculate_technical_indicators(df: pd.DataFrame) -> dict:
             'upper': bb_upper.iloc[-1],
             'middle': bb_middle.iloc[-1],
             'lower': bb_lower.iloc[-1],
-            'current_price': close.iloc[-1],
-            'position': (close.iloc[-1] - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1])
+            'current_price': close.iloc[0],  # 使用iloc[0]获取最新价格
+            'position': (close.iloc[0] - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1])  # 使用iloc[0]获取最新价格
         },
         'volume': {
             'ratio': volume_ratio.iloc[-1],
@@ -226,7 +226,7 @@ def print_analysis_report(ticker: str, df: pd.DataFrame, signal_result: dict):
     print("=" * 60)
     
     # 基本价格信息
-    latest_price = df['close'].iloc[-1]
+    latest_price = df['close'].iloc[0]  # 使用iloc[0]获取最新价格
     prev_price = df['close'].iloc[-2]
     change = latest_price - prev_price
     change_pct = (change / prev_price) * 100

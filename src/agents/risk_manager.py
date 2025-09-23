@@ -34,7 +34,7 @@ def risk_management_agent(state: AgentState):
         progress.update_status("risk_management_agent", ticker, "Calculating position limits")
 
         # Calculate portfolio value
-        current_price = prices_df["close"].iloc[-1]
+        current_price = prices_df["close"].iloc[0]  # 使用iloc[0]获取最新价格
         current_prices[ticker] = current_price  # Store the current price
 
         # Calculate current position value for this ticker

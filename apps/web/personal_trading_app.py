@@ -1,6 +1,7 @@
 import streamlit as st
 import sys
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 import plotly.graph_objects as go
@@ -20,9 +21,11 @@ src_dir = os.path.join(project_root, 'src')
 sys.path.insert(0, src_dir)
 
 from tools.api import get_prices, prices_to_df, get_financial_metrics, cleanup_cache, get_cache_stats, clear_ticker_cache
+from tools.alphavantage_mcp_wrapper import get_alphavantage_wrapper
 from data.cache import get_cache
 from data.database import get_database_manager
 from utils.personal_indicators import generate_comprehensive_signal
+from analyzers.fundamental_analyzer import FinnhubFundamentalAnalyzer, analyze_multiple_stocks, generate_analysis_report
 import uuid
 import re
 
@@ -36,6 +39,8 @@ st.set_page_config(
 # 获取数据库管理器和缓存实例
 db_manager = get_database_manager()
 cache_instance = get_cache()
+
+
 
 # 生成会话ID
 if 'session_id' not in st.session_state:
@@ -158,7 +163,8 @@ st.markdown("""
 
 # 主标题
 st.title("🎯 个性化交易分析系统")
-st.markdown("基于MACD + RSI + 布林带 + 成交量的技术分析")
+st.markdown("基于技术分析 + 基本面分析的综合投资决策系统")
+
 
 # 智能缓存提示
 with st.expander("💡 智能缓存策略说明", expanded=False):
@@ -174,7 +180,9 @@ with st.expander("💡 智能缓存策略说明", expanded=False):
     
     🔹 **缓存命中率显示**: 查询结果会显示缓存命中率，帮助您了解系统效率
     
-    🔹 **多级缓存架构**: 内存缓存 → SQLite缓存 → iTick API，确保最佳性能
+    🔹 **多级缓存架构**: 内存缓存 → SQLite缓存 → Alpha Vantage MCP，确保最佳性能
+    
+    🔹 **纯美股数据**: 现在使用 Alpha Vantage MCP 服务，主要支持美股市场实时数据
     """)
 
 # 侧边栏参数设置
@@ -187,31 +195,30 @@ with st.sidebar:
     # 市场支持信息
     with st.expander("🌍 支持的市场和格式", expanded=False):
         st.markdown("""
-        **支持的市场:**
-        - 🇺🇸 **美股** (US): AAPL, MSFT, GOOGL, TSLA
-        - 🇭🇰 **港股** (HK): 00700, 09988, HK.00700, HK.09988
-        - 🇨🇳 **上证** (SH): 600519, 000001.SH, 600036.SH
-        - 🇨🇳 **深证** (SZ): 000001, 000002.SZ, 300750.SZ
-        - 🇸🇬 **新加坡** (SG): 支持，待完善格式检测
-        - 🇯🇵 **日本** (JP): 支持，待完善格式检测
+        **主要支持的市场:**
+        - 🇺🇸 **美股** (US): AAPL, MSFT, GOOGL, TSLA - **主要支持，数据最全**
+        
+        **有限支持的市场:**
+        - 🇭🇰 **港股** (HK): 00700, 09988 - 部分支持，主要依赖缓存数据
+        - 🇨🇳 **A股** (SH/SZ): 600519, 000001 - 部分支持，主要依赖缓存数据
         
         **格式示例:**
-        - 美股: `AAPL,MSFT,NVDA`
-        - 港股: `00700,09988,03690` 或 `HK.00700,HK.09988`
-        - 上证: `600519,600036` 或 `600519.SH,600036.SH`
-        - 深证: `000001,000002,300750` 或 `000001.SZ,000002.SZ`
-        - 混合: `AAPL,00700,600519,000001`
+        - 美股: `AAPL,MSFT,NVDA,TSLA`
+        - 港股: `00700,09988,03690` (可能需要缓存数据)
+        - A股: `600519,000001` (可能需要缓存数据)
+        - 混合: `AAPL,MSFT,NVDA` (建议主要使用美股)
         
-        **注意事项:**
-        - 系统会自动检测股票代码的市场区域
-        - 不同市场的数据来源和更新频率可能不同
-        - 部分市场的财务数据可能有限
+        **重要说明:**
+        - 🔄 **数据源已更新**: 从 iTick API 更换为 Alpha Vantage MCP 服务
+        - 🇺🇸 **美股数据**: 实时、准确、全面，包括技术分析和基本面分析
+        - 🌍 **其他市场**: 依赖历史缓存数据，可能不是最新数据
+        - 📊 **基本面分析**: 仅支持美股市场
         """)
     
     tickers_input = st.text_input(
         "股票代码 (逗号分隔)",
-        value="ZETA,RXRX,BEKE,CRCL,CRWV",
-        help="输入要分析的股票代码，多个代码用逗号分隔。支持美股、港股、A股等多个市场"
+        value="RXRX,CRWV,SBET,CRCL,NBIS",
+        help="输入要分析的股票代码，多个代码用逗号分隔。建议使用美股代码获得最佳数据质量"
     )
     
     # 日期范围选择
@@ -230,9 +237,16 @@ with st.sidebar:
         )
     
     # 高级选项
-    st.subheader("🔧 高级选项")
+    st.subheader("🔧 分析选项")
+    
+    # 基本面分析选项
+    enable_fundamental_analysis = st.checkbox("启用基本面分析", value=True, help="基于财务指标的五模块分析")
+    
+    # 技术分析显示选项
     show_detailed_indicators = st.checkbox("显示详细技术指标", value=False)
     show_historical_data = st.checkbox("显示历史数据", value=False)
+    
+    # 其他选项
     show_query_history = st.checkbox("显示查询历史", value=False)
     show_cache_stats = st.checkbox("显示缓存统计", value=False)
     auto_refresh = st.checkbox("自动刷新", value=False)
@@ -349,9 +363,9 @@ with st.sidebar:
                 st.info("暂无数据库缓存统计数据")
 
 
-def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None):
+def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_record_id: int = None, enable_fundamental: bool = True):
     """
-    简化版股票分析 - 为Streamlit优化，支持数据库记录，支持多市场
+    综合版股票分析 - 支持技术分析 + 基本面分析，支持多市场
     """
     # 检测股票代码市场
     region = detect_market_region(ticker)
@@ -381,7 +395,7 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
             error_msg = f"⚠️ 无法获取 {ticker_display} 的价格数据。可能的原因：\n"
             error_msg += f"• 股票代码 {ticker} 可能不存在或已退市\n"
             error_msg += f"• 查询日期范围可能包含未来日期\n"
-            error_msg += f"• 市场 {region.upper()} 可能暂时不可用\n"
+            error_msg += f"• 市场 {region.upper()} 可能不被 Alpha Vantage 支持（建议使用美股代码）\n"
             error_msg += f"• 网络连接或API服务问题"
             st.error(error_msg)
             return None
@@ -413,20 +427,48 @@ def analyze_stock_simple(ticker: str, start_date: str, end_date: str, query_reco
         except Exception as e:
             st.warning(f"⚠️ 财务指标获取失败: {str(e)}")
         
+        # 基本面分析（可选）
+        fundamental_result = None
+        if enable_fundamental and region == 'us':  # 目前只支持美股基本面分析
+            try:
+                status_text.text(f"📊 基本面分析...")
+                analyzer = FinnhubFundamentalAnalyzer()
+                fundamental_result = analyzer.analyze_stock(ticker)
+                progress_bar.progress(95)
+            except Exception as e:
+                st.warning(f"⚠️ 基本面分析失败: {str(e)}")
+        elif enable_fundamental and region != 'us':
+            st.info(f"📊 基本面分析目前只支持美股，{format_ticker_display(ticker, region)}将跳过基本面分析")
+        
         progress_bar.progress(100)
         status_text.text("✅ 分析完成！")
         
-        # 组装结果
+        # 组装结果 - 修复当前价格获取逻辑
+        # 尝试获取实时报价作为当前价格
+        try:
+            # 优先使用价格数据中的最新价格
+            # 由于prices_df已经按日期正序排列，最新的价格在最后
+            current_price = prices_df['close'].iloc[-1] if len(prices_df) > 0 else None
+            print(f"💰 当前价格: {current_price} (来自历史数据最新记录)")
+            
+            # 如果需要更准确的实时数据，可以调用其他API
+            # 注意：这里移除了AlphaVantage的实时报价获取
+        except Exception as e:
+            print(f"⚠️ 获取实时报价失败，使用历史数据: {str(e)}")
+            # 由于prices_df已经按日期正序排列，最新的价格在最后
+            current_price = prices_df['close'].iloc[-1] if len(prices_df) > 0 else None  # 使用iloc[-1]获取最新价格
+        
         result = {
             'ticker': ticker,
             'ticker_display': ticker_display,
             'region': region,
-            'current_price': prices_df['close'].iloc[-1],
+            'current_price': current_price,
             'analysis': analysis_result,
             'financial_metrics': {
                 'pe_ratio': pe_ratio,
                 'pb_ratio': pb_ratio
             },
+            'fundamental_analysis': fundamental_result,  # 新增基本面分析结果
             'data_days': len(prices_df),
             'prices_df': prices_df
         }
@@ -498,8 +540,30 @@ def generate_trading_recommendation(analysis_result):
 
 def create_price_chart(prices_df, ticker, analysis):
     """
-    创建价格图表
+    创建价格图表，只显示有实际交易数据的日期
     """
+    # 严格的过滤条件，确保只显示有效交易数据
+    # 1. 成交量大于0
+    # 2. 价格数据有效（不为NaN或None）
+    # 3. 价格数据大于0
+    filtered_prices_df = prices_df[
+        (prices_df['volume'] > 0) & 
+        (prices_df['open'].notna()) & 
+        (prices_df['high'].notna()) & 
+        (prices_df['low'].notna()) & 
+        (prices_df['close'].notna()) &
+        (prices_df['open'] > 0) & 
+        (prices_df['high'] > 0) & 
+        (prices_df['low'] > 0) & 
+        (prices_df['close'] > 0)
+    ].copy()
+    
+    # 确保索引是日期类型并排序
+    if not filtered_prices_df.empty:
+        filtered_prices_df.index = pd.to_datetime(filtered_prices_df.index, format='mixed', errors='coerce')
+        filtered_prices_df = filtered_prices_df.sort_index()
+    
+    # 创建子图
     fig = make_subplots(
         rows=4, cols=1,
         shared_xaxes=True,
@@ -508,91 +572,166 @@ def create_price_chart(prices_df, ticker, analysis):
         row_heights=[0.5, 0.2, 0.15, 0.15]
     )
     
-    # 主图：价格和布林带
-    fig.add_trace(
-        go.Candlestick(
-            x=prices_df.index,
-            open=prices_df['open'],
-            high=prices_df['high'],
-            low=prices_df['low'],
-            close=prices_df['close'],
-            name='价格'
-        ),
-        row=1, col=1
-    )
+    # 主图：价格和布林带（只在有数据时添加）
+    if not filtered_prices_df.empty:
+        # 添加K线图，只显示有交易的数据点
+        fig.add_trace(
+            go.Candlestick(
+                x=filtered_prices_df.index,
+                open=filtered_prices_df['open'],
+                high=filtered_prices_df['high'],
+                low=filtered_prices_df['low'],
+                close=filtered_prices_df['close'],
+                name='价格'
+            ),
+            row=1, col=1
+        )
+        
+        # 添加布林带（如果存在且有效）
+        if 'bollinger' in analysis.get('details', {}) and not filtered_prices_df.empty:
+            boll_details = analysis['details']['bollinger']
+            # 只有当布林带值有效时才添加水平线
+            if pd.notna(boll_details['current_upper']) and boll_details['current_upper'] > 0:
+                fig.add_hline(
+                    y=boll_details['current_upper'],
+                    line_dash="dash",
+                    line_color="red",
+                    annotation_text="布林上轨",
+                    row=1, col=1
+                )
+            if pd.notna(boll_details['current_middle']) and boll_details['current_middle'] > 0:
+                fig.add_hline(
+                    y=boll_details['current_middle'],
+                    line_dash="dash", 
+                    line_color="blue",
+                    annotation_text="布林中轨",
+                    row=1, col=1
+                )
+            if pd.notna(boll_details['current_lower']) and boll_details['current_lower'] > 0:
+                fig.add_hline(
+                    y=boll_details['current_lower'],
+                    line_dash="dash",
+                    line_color="green", 
+                    annotation_text="布林下轨",
+                    row=1, col=1
+                )
     
-    # 计算布林带
-    if 'bollinger' in analysis['details']:
-        boll_details = analysis['details']['bollinger']
-        # 这里需要完整的布林带数据，简化处理
-        fig.add_hline(
-            y=boll_details['current_upper'],
-            line_dash="dash",
-            line_color="red",
-            annotation_text="布林上轨",
-            row=1, col=1
-        )
-        fig.add_hline(
-            y=boll_details['current_middle'],
-            line_dash="dash", 
-            line_color="blue",
-            annotation_text="布林中轨",
-            row=1, col=1
-        )
-        fig.add_hline(
-            y=boll_details['current_lower'],
-            line_dash="dash",
-            line_color="green", 
-            annotation_text="布林下轨",
-            row=1, col=1
-        )
-    
-    # MACD图
-    if 'raw_data' in analysis and 'macd_data' in analysis['raw_data']:
+    # MACD图（确保索引匹配且数据有效）
+    if 'raw_data' in analysis and 'macd_data' in analysis['raw_data'] and not filtered_prices_df.empty:
         macd_data = analysis['raw_data']['macd_data']
-        recent_dates = prices_df.index[-len(macd_data['dif']):]
+        # 使用过滤后的价格数据索引，确保只显示有交易的数据点
+        macd_dates = filtered_prices_df.index
         
-        fig.add_trace(
-            go.Scatter(x=recent_dates, y=macd_data['dif'], name='DIF', line=dict(color='blue')),
-            row=2, col=1
-        )
-        fig.add_trace(
-            go.Scatter(x=recent_dates, y=macd_data['dea'], name='DEA', line=dict(color='red')),
-            row=2, col=1
-        )
-        fig.add_trace(
-            go.Bar(x=recent_dates, y=macd_data['macd'], name='MACD', marker_color='green'),
-            row=2, col=1
-        )
+        # 确保技术指标数据长度与价格数据匹配
+        if len(macd_data['dif']) > 0 and len(macd_data['dea']) > 0 and len(macd_data['macd']) > 0:
+            min_length = min(len(macd_data['dif']), len(macd_dates))
+            if min_length > 0:
+                # 取最近的数据点
+                recent_dates = macd_dates[-min_length:]
+                dif_data = macd_data['dif'][-min_length:]
+                dea_data = macd_data['dea'][-min_length:]
+                macd_bar_data = macd_data['macd'][-min_length:]
+                
+                # 过滤掉NaN值和无穷大值
+                valid_mask = [
+                    pd.notna(dif_data[i]) and pd.notna(dea_data[i]) and pd.notna(macd_bar_data[i]) and
+                    np.isfinite(dif_data[i]) and np.isfinite(dea_data[i]) and np.isfinite(macd_bar_data[i])
+                    for i in range(len(dif_data))
+                ]
+                
+                # 确保有足够的有效数据点
+                valid_count = sum(valid_mask)
+                if valid_count > 1:  # 至少需要2个数据点
+                    valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                    valid_dif = [dif_data[i] for i in range(len(dif_data)) if valid_mask[i]]
+                    valid_dea = [dea_data[i] for i in range(len(dea_data)) if valid_mask[i]]
+                    valid_macd = [macd_bar_data[i] for i in range(len(macd_bar_data)) if valid_mask[i]]
+                    
+                    # 添加MACD指标，只显示有交易的数据点
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_dif, 
+                                  name='DIF', line=dict(color='blue')),
+                        row=2, col=1
+                    )
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_dea, 
+                                  name='DEA', line=dict(color='red')),
+                        row=2, col=1
+                    )
+                    fig.add_trace(
+                        go.Bar(x=valid_dates, y=valid_macd, 
+                              name='MACD', marker_color='green'),
+                        row=2, col=1
+                    )
     
-    # RSI图
-    if 'raw_data' in analysis and 'rsi_data' in analysis['raw_data']:
+    # RSI图（确保索引匹配且数据有效）
+    if 'raw_data' in analysis and 'rsi_data' in analysis['raw_data'] and not filtered_prices_df.empty:
         rsi_data = analysis['raw_data']['rsi_data']
-        recent_dates = prices_df.index[-len(rsi_data):]
+        # 使用过滤后的价格数据索引，确保只显示有交易的数据点
+        rsi_dates = filtered_prices_df.index
         
+        # 确保技术指标数据长度与价格数据匹配
+        min_length = min(len(rsi_data), len(rsi_dates))
+        if min_length > 0:
+            # 取最近的数据点
+            recent_dates = rsi_dates[-min_length:]
+            rsi_values = rsi_data[-min_length:]
+            
+            # 过滤掉NaN值和无效值（0-100范围外的值）
+            valid_mask = [
+                pd.notna(x) and 0 <= x <= 100 and np.isfinite(x)
+                for x in rsi_values
+            ]
+            
+            # 确保有足够的有效数据点
+            valid_count = sum(valid_mask)
+            if valid_count > 1:  # 至少需要2个数据点
+                valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                valid_rsi = [rsi_values[i] for i in range(len(rsi_values)) if valid_mask[i]]
+                
+                # 添加RSI指标，只显示有交易的数据点
+                fig.add_trace(
+                    go.Scatter(x=valid_dates, y=valid_rsi, 
+                              name='RSI', line=dict(color='purple')),
+                    row=3, col=1
+                )
+                # 添加超买超卖线
+                fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="超买线", row=3, col=1)
+                fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="超卖线", row=3, col=1)
+    
+    # 成交量图（只显示有交易的日期）
+    if not filtered_prices_df.empty:
         fig.add_trace(
-            go.Scatter(x=recent_dates, y=rsi_data, name='RSI', line=dict(color='purple')),
-            row=3, col=1
+            go.Bar(
+                x=filtered_prices_df.index,
+                y=filtered_prices_df['volume'],
+                name='成交量',
+                marker_color='lightblue'
+            ),
+            row=4, col=1
         )
-        fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="超买线", row=3, col=1)
-        fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="超卖线", row=3, col=1)
     
-    # 成交量图
-    fig.add_trace(
-        go.Bar(
-            x=prices_df.index,
-            y=prices_df['volume'],
-            name='成交量',
-            marker_color='lightblue'
-        ),
-        row=4, col=1
-    )
-    
+    # 更新图表布局
     fig.update_layout(
         height=800,
         showlegend=True,
-        title_text=f"{ticker} 技术分析图表"
+        title_text=f"{ticker} 技术分析图表",
+        xaxis_rangeslider_visible=False,  # 隐藏范围滑块以减少混乱
     )
+    
+    # 更新Y轴标题
+    fig.update_yaxes(title_text="价格", row=1, col=1)
+    fig.update_yaxes(title_text="MACD", row=2, col=1)
+    fig.update_yaxes(title_text="RSI", row=3, col=1)
+    fig.update_yaxes(title_text="成交量", row=4, col=1)
+    
+    # 确保X轴只显示有数据的日期，使数值连续显示
+    if not filtered_prices_df.empty:
+        fig.update_xaxes(
+            type='date',
+            tickformat='%Y-%m-%d',
+            row=4, col=1
+        )
     
     return fig
 
@@ -659,6 +798,72 @@ def display_detailed_indicators(analysis):
         
         st.write(f"**成交量趋势:** {volume_details['volume_trend']}")
         st.write(f"**放量:** {'是' if volume_details['is_surge'] else '否'}")
+
+
+def display_fundamental_analysis(fundamental_result):
+    """
+    显示基本面分析结果
+    """
+    if not fundamental_result:
+        return
+    
+    st.subheader("📈 基本面分析结果")
+    
+    # 综合评分和投资建议
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        st.metric("综合评分", f"{fundamental_result.total_score:.1f}/50.0")
+        st.caption(f"综合百分比: {fundamental_result.overall_percentage:.1f}%")
+    
+    with col2:
+        # 投资信号颜色显示
+        signal_colors = {
+            "强烈买入": "#00c851",
+            "买入": "#00c851", 
+            "持有": "#ffbb33",
+            "卖出": "#ff4444",
+            "强烈卖出": "#ff4444"
+        }
+        signal_value = fundamental_result.investment_signal.value
+        color = signal_colors.get(signal_value, "#666666")
+        st.markdown(f"**投资建议:** <span style='color: {color}; font-weight: bold;'>{signal_value}</span>", 
+                   unsafe_allow_html=True)
+    
+    with col3:
+        st.metric("信心度", f"{fundamental_result.confidence:.1f}%")
+        st.caption(f"公司类型: {fundamental_result.company_type.value}")
+    
+    # 五大模块评分
+    st.subheader("📊 五大模块评分")
+    
+    modules = [
+        ("🏢 经营质量", fundamental_result.operating_quality),
+        ("💰 盈利效率", fundamental_result.profitability_efficiency),
+        ("🚀 成长地位", fundamental_result.growth_market_position),
+        ("⚠️ 财务风险", fundamental_result.financial_risk),
+        ("👥 管理治理", fundamental_result.management_governance)
+    ]
+    
+    # 分两行显示
+    for i in range(0, len(modules), 3):
+        cols = st.columns(3)
+        for j in range(3):
+            if i + j < len(modules):
+                name, score_obj = modules[i + j]
+                with cols[j]:
+                    st.metric(name, f"{score_obj.score:.1f}/10.0")
+                    st.caption(f"{score_obj.percentage:.1f}%")
+                    
+                    # 显示前3个详情
+                    with st.expander("查看详情"):
+                        for detail in score_obj.details[:3]:
+                            st.write(f"• {detail}")
+    
+    # 详细分析报告
+    with st.expander("📝 详细分析报告", expanded=False):
+        report = generate_analysis_report(fundamental_result)
+        st.text(report)
 
 
 def display_historical_data(analysis):
@@ -782,7 +987,7 @@ def main():
                 if not history_df.empty:
                     # 格式化显示
                     display_df = history_df[['timestamp', 'tickers', 'start_date', 'end_date', 'result_count', 'avg_confidence']].copy()
-                    display_df['timestamp'] = pd.to_datetime(display_df['timestamp']).dt.strftime('%Y-%m-%d %H:%M')
+                    display_df['timestamp'] = pd.to_datetime(display_df['timestamp'], format='mixed', errors='coerce').dt.strftime('%Y-%m-%d %H:%M')
                     display_df['tickers'] = display_df['tickers'].apply(lambda x: ', '.join(x) if isinstance(x, list) else str(x))
                     display_df.columns = ['查询时间', '股票代码', '开始日期', '结束日期', '结果数量', '平均信心度']
                     st.dataframe(display_df, use_container_width=True)
@@ -799,6 +1004,7 @@ def main():
         query_record_id = None
         try:
             analysis_params = {
+                'enable_fundamental_analysis': enable_fundamental_analysis,
                 'show_detailed_indicators': show_detailed_indicators,
                 'show_historical_data': show_historical_data,
                 'auto_refresh': auto_refresh
@@ -828,7 +1034,8 @@ def main():
                     ticker, 
                     start_date.strftime("%Y-%m-%d"), 
                     end_date.strftime("%Y-%m-%d"),
-                    query_record_id
+                    query_record_id,
+                    enable_fundamental_analysis  # 传递基本面分析选项
                 )
                 
                 if result:
@@ -875,6 +1082,11 @@ def main():
                         st.markdown(f"**建议:** {recommendation['recommendation']}")
                         st.write(f"**行动:** {recommendation['action']}")
                         st.write(f"**信心度:** {recommendation['confidence']}%")
+                    
+                    # 基本面分析结果（如果启用）
+                    if result.get('fundamental_analysis'):
+                        st.markdown("---")
+                        display_fundamental_analysis(result['fundamental_analysis'])
                     
                     # 详细指标分析
                     st.subheader("📋 各指标信号")

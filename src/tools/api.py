@@ -1,7 +1,15 @@
 import os
 import pandas as pd
 from typing import Optional
-from .itick_api import get_itick_api, date_to_timestamp
+from .finnhub_financial_api import fetch_financial_metrics_from_finnhub, test_finnhub_financial_connection
+
+from .rapidapi_yahoo_finance import (
+    fetch_prices_from_rapidapi_yahoo,
+    fetch_financial_metrics_from_rapidapi_yahoo,
+    test_rapidapi_yahoo_connection
+)
+from .rapidapi_yahoo_mcp import get_personal_trading_data_rapidapi
+from .akshare_api import get_prices_akshare, get_financial_metrics_akshare
 import re
 
 from data.cache import get_cache
@@ -64,7 +72,7 @@ def _detect_ticker_region(ticker: str) -> str:
     return 'us'
 
 
-def get_prices(ticker: str, start_date: str, end_date: str, region: str = None) -> list[Price]:
+def get_prices(ticker: str, start_date: str, end_date: str, region: str = None, api_source: str = "akshare") -> list[Price]:
     """Fetch price data with intelligent cache: analyze existing cache and request only missing dates.
     
     Args:
@@ -72,11 +80,12 @@ def get_prices(ticker: str, start_date: str, end_date: str, region: str = None) 
         start_date: 开始日期 (YYYY-MM-DD)
         end_date: 结束日期 (YYYY-MM-DD)
         region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
+        api_source: API数据源，默认使用 "akshare"，备用 "rapidapi"
     """
-    return _get_prices_intelligent_cache(ticker, start_date, end_date, region)
+    return _get_prices_intelligent_cache(ticker, start_date, end_date, region, api_source)
 
 
-def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, region: str = None) -> list[Price]:
+def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, region: str = None, api_source: str = "akshare") -> list[Price]:
     """
     智能缓存策略：分析已有缓存数据，只请求缺失的日期范围
     
@@ -156,20 +165,42 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
         print(f"✅ {ticker} 数据完全命中缓存: {len(all_cached_prices)} 条")
         return all_cached_prices
     
-    # 3. 对缺失的日期范围请求API
+    # 3. 对缺失的日期范围请求API - 默认使用AKShare作为主要数据源
     new_prices = []
     for missing_start, missing_end in missing_ranges:
-        print(f"🔄 从 iTick API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
-        try:
-            range_prices = _fetch_prices_from_itick(ticker, missing_start, missing_end, region)
-            if range_prices:
-                new_prices.extend(range_prices)
-                print(f"✅ 成功获取 {len(range_prices)} 条新数据")
-        except Exception as e:
-            print(f"❌ 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
-            print(f"❌ 详细错误: {type(e).__name__}: {str(e)}")
-            # 继续处理其他日期范围
-            continue
+        # 定义数据源优先级：AKShare -> Finnhub -> RapidAPI Yahoo Finance
+        data_sources = [
+            ("AKShare", _fetch_prices_from_akshare),
+            ("Finnhub", _fetch_prices_from_finnhub),
+            ("RapidAPI Yahoo Finance", _fetch_prices_from_rapidapi_yahoo)
+        ]
+        
+        range_prices = []
+        last_error = None
+        
+        for source_name, fetch_func in data_sources:
+            print(f"🔄 尝试从 {source_name} 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
+            try:
+                range_prices = fetch_func(ticker, missing_start, missing_end, region)
+                if range_prices:
+                    new_prices.extend(range_prices)
+                    print(f"✅ {source_name} 成功获取 {len(range_prices)} 条新数据")
+                    break  # 成功获取数据，跳出循环
+                else:
+                    print(f"⚠️ {source_name} 返回空数据，尝试下一个数据源...")
+            except Exception as e:
+                last_error = e
+                print(f"❌ {source_name} 获取数据失败: {str(e)}")
+                if source_name != data_sources[-1][0]:  # 不是最后一个数据源
+                    print(f"🔄 尝试下一个数据源...")
+                continue
+        
+        # 如果所有数据源都失败，记录警告但继续处理其他日期范围
+        if not range_prices:
+            print(f"⚠️ 所有数据源都无法获取 {ticker} 在 {missing_start} 到 {missing_end} 期间的价格数据")
+            if last_error:
+                print(f"   最后错误: {type(last_error).__name__}: {str(last_error)}")
+            # 继续处理其他日期范围，不中断服务
     
     # 4. 缓存新获取的数据
     if new_prices:
@@ -183,23 +214,21 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
     
     # 5. 合并所有数据
     all_prices = all_cached_prices + new_prices
-    all_prices.sort(key=lambda x: x.time)
+    # 按日期倒序排序，确保最新数据在前
+    all_prices.sort(key=lambda x: x.time, reverse=True)
     
     # 过滤到请求的日期范围
     filtered_prices = [p for p in all_prices if start_date <= p.time <= end_date]
     
     if not filtered_prices:
-        # 提供更详细的错误信息
-        error_details = []
-        error_details.append(f"股票代码: {ticker}")
-        error_details.append(f"市场区域: {region}")
-        error_details.append(f"查询日期范围: {start_date} 到 {end_date}")
-        error_details.append(f"缓存数据: {len(all_cached_prices)} 条")
-        error_details.append(f"新获取数据: {len(new_prices)} 条")
-        error_details.append(f"缺失日期范围: {len(missing_ranges)} 个")
-        
-        error_msg = f"无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据\n" + "\n".join([f"  - {detail}" for detail in error_details])
-        raise Exception(error_msg)
+        # 改为记录警告而不是抛出异常，确保服务继续运行
+        print(f"⚠️ 警告：无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据")
+        print(f"   市场区域: {region}")
+        print(f"   缓存数据: {len(all_cached_prices)} 条")
+        print(f"   新获取数据: {len(new_prices)} 条")
+        print(f"   缺失日期范围: {len(missing_ranges)} 个")
+        # 返回空列表而不是抛出异常，确保服务继续运行
+        return []
     
     cache_ratio = len(all_cached_prices) / len(filtered_prices) * 100 if filtered_prices else 0
     print(f"📊 {ticker} 数据获取完成: 总计 {len(filtered_prices)} 条 (缓存命中率: {cache_ratio:.1f}%)")
@@ -278,6 +307,7 @@ def get_financial_metrics(
     period: str = "ttm",
     limit: int = 10,
     region: str = None,
+    api_source: str = "akshare"
 ) -> list[FinancialMetrics]:
     """Fetch financial metrics with multi-level cache: memory -> SQLite -> iTick API.
     
@@ -287,6 +317,7 @@ def get_financial_metrics(
         period: 报告期间
         limit: 数据限制
         region: 市场区域 (us, hk, sh, sz, sg, jp)，如果不提供则自动检测
+        api_source: API数据源，可选 "akshare" (默认) 或 "finnhub"
     """
     # 如果没有提供region，则自动检测
     if region is None:
@@ -315,31 +346,58 @@ def get_financial_metrics(
     except Exception as e:
         print(f"⚠️ SQLite财务缓存读取失败: {str(e)}")
 
-    # 第三级：从iTick API获取数据
-    print(f"🔄 从 iTick API 获取 {ticker} 的财务指标...")
-    try:
-        metrics = _fetch_financial_metrics_from_itick(ticker, end_date, period, limit, region)
-        
-        if not metrics:
-            raise Exception(f"iTick API 返回空财务数据，股票代码: {ticker}")
-            
-        print(f"✅ 成功从 iTick API 获取到财务指标")
-        
-        # 存储到双级缓存
-        metric_dicts = [m.model_dump() for m in metrics]
-        _cache.set_financial_metrics(ticker, metric_dicts)  # 内存缓存
-        
+    # 第三级：尝试多个数据源获取财务指标
+    data_sources = [
+        ("AKShare", _fetch_financial_metrics_from_akshare),
+        ("Finnhub", _fetch_financial_metrics_from_finnhub),
+        ("RapidAPI Yahoo Finance", _fetch_financial_metrics_from_rapidapi_yahoo)
+    ]
+    
+    # 根据api_source调整优先级
+    if api_source == "akshare":
+        # AKShare优先
+        data_sources = [data_sources[0], data_sources[1], data_sources[2]]
+    else:
+        # Finnhub优先
+        data_sources = [data_sources[1], data_sources[0], data_sources[2]]
+    
+    last_error = None
+    
+    for source_name, fetch_func in data_sources:
+        print(f"🔄 从 {source_name} API 获取 {ticker} 的财务指标...")
         try:
-            _db_manager.cache_financial_data(ticker, metric_dicts, cache_hours=24*7)  # SQLite缓存
-            print(f"💾 财务指标已缓存到SQLite数据库")
-        except Exception as cache_error:
-            print(f"⚠️ SQLite财务缓存存储失败: {str(cache_error)}")
-        
-        return metrics
-        
-    except Exception as e:
-        print(f"❌ iTick API 获取财务指标失败: {str(e)}")
-        raise Exception(f"无法从 iTick API 获取 {ticker} 的财务指标: {str(e)}")
+            metrics = fetch_func(ticker, end_date, period, limit, region)
+            
+            if metrics:
+                print(f"✅ 成功从 {source_name} API 获取到财务指标")
+                
+                # 存储到双级缓存
+                metric_dicts = [m.model_dump() for m in metrics]
+                _cache.set_financial_metrics(ticker, metric_dicts)  # 内存缓存
+                
+                try:
+                    _db_manager.cache_financial_data(ticker, metric_dicts, cache_hours=24*7)  # SQLite缓存
+                    print(f"💾 财务指标已缓存到SQLite数据库")
+                except Exception as cache_error:
+                    print(f"⚠️ SQLite财务缓存存储失败: {str(cache_error)}")
+                
+                return metrics
+            else:
+                print(f"⚠️ {source_name} API 返回空财务数据，尝试下一个数据源...")
+                continue
+                
+        except Exception as e:
+            last_error = e
+            print(f"❌ {source_name} API 获取财务指标失败: {str(e)}")
+            if source_name != data_sources[-1][0]:  # 不是最后一个数据源
+                print(f"🔄 尝试下一个数据源...")
+            continue
+    
+    # 所有数据源都失败时，记录警告并返回空列表
+    print(f"⚠️ 所有数据源都无法获取 {ticker} 的财务指标")
+    if last_error:
+        print(f"   最后错误: {type(last_error).__name__}: {str(last_error)}")
+    return []
 
 
 
@@ -355,9 +413,9 @@ def search_line_items(
     period: str = "ttm",
     limit: int = 10,
 ) -> list[LineItem]:
-    """Fetch line items using iTick API."""
+    """Fetch line items using Alpha Vantage MCP."""
     try:
-        # Get financial metrics from iTick API
+        # Get financial metrics from Alpha Vantage MCP
         metrics = get_financial_metrics(ticker, end_date, period, limit)
         
         if not metrics:
@@ -389,7 +447,7 @@ def search_line_items(
         return line_items_result
         
     except Exception as e:
-        raise Exception(f"Error fetching line items from iTick API: {ticker} - {str(e)}")
+        raise Exception(f"Error fetching line items from Alpha Vantage MCP: {ticker} - {str(e)}")
 
 
 def get_insider_trades(
@@ -453,10 +511,11 @@ def prices_to_df(prices: list[Price]) -> pd.DataFrame:
     df = pd.DataFrame([p.model_dump() for p in prices])
     df["Date"] = pd.to_datetime(df["time"])
     df.set_index("Date", inplace=True)
-    numeric_cols = ["open", "close", "high", "low", "volume"]
+    numeric_cols = ["open", "high", "low", "close", "volume"]  # 保持正确的列顺序
     for col in numeric_cols:
         df[col] = pd.to_numeric(df[col], errors="coerce")
-    df.sort_index(inplace=True)
+    # 按日期正序排列（从旧到新），这是技术指标计算所必需的
+    df.sort_index(ascending=True, inplace=True)
     return df
 
 
@@ -500,8 +559,8 @@ def get_price_data(ticker: str, start_date: str, end_date: str) -> pd.DataFrame:
 # Data Source Implementations
 # =============================================================================
 
-def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
-    """从iTick API获取价格数据
+def _fetch_prices_from_alphavantage(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从Alpha Vantage MCP服务获取价格数据
     
     Args:
         ticker: 股票代码
@@ -509,23 +568,11 @@ def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region
         end_date: 结束日期
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    itick_api = get_itick_api()
+    # Alpha Vantage 主要支持美股，对其他市场发出警告
+    if region != 'us':
+        print(f"⚠️ Alpha Vantage 主要支持美股，{ticker} 市场区域 {region} 可能不支持")
     
-    # 转换日期为时间戳
-    start_timestamp = date_to_timestamp(start_date)
-    end_timestamp = date_to_timestamp(end_date)
-    
-    # 获取历史K线数据
-    kline_data = itick_api.get_historical_kline(
-        ticker=ticker,
-        period="1d",
-        start_time=str(start_timestamp),
-        end_time=str(end_timestamp),
-        region=region
-    )
-    
-    # 转换为Price对象
-    return itick_api.convert_to_price_objects(kline_data, ticker)
+    return fetch_prices_from_alphavantage(ticker, start_date, end_date, region)
 
 
 
@@ -534,14 +581,14 @@ def _fetch_prices_from_itick(ticker: str, start_date: str, end_date: str, region
 
 
 
-def _fetch_financial_metrics_from_itick(
+def _fetch_financial_metrics_from_akshare(
     ticker: str,
     end_date: str,
     period: str = "ttm",
     limit: int = 10,
     region: str = 'us',
 ) -> list[FinancialMetrics]:
-    """从iTick API获取财务指标
+    """从 AKShare API 获取财务指标
     
     Args:
         ticker: 股票代码
@@ -550,13 +597,106 @@ def _fetch_financial_metrics_from_itick(
         limit: 数据限制
         region: 市场区域 (us, hk, sh, sz, sg, jp)
     """
-    itick_api = get_itick_api()
+    print(f"🚀 使用 AKShare API 获取 {ticker} 财务指标 (市场: {region})")
     
-    # 获取财务数据
-    financial_data = itick_api.get_financial_data(ticker, region=region)
+    return get_financial_metrics_akshare(ticker, end_date, period, limit)
+
+
+def _fetch_financial_metrics_from_finnhub(
+    ticker: str,
+    end_date: str,
+    period: str = "ttm",
+    limit: int = 10,
+    region: str = 'us',
+) -> list[FinancialMetrics]:
+    """从Finnhub API获取财务指标
     
-    # 转换为FinancialMetrics对象
-    return itick_api.convert_to_financial_metrics(financial_data, ticker)
+    Args:
+        ticker: 股票代码
+        end_date: 结束日期
+        period: 报告期间
+        limit: 数据限制
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
+    # Finnhub 主要支持美股
+    if region != 'us':
+        print(f"⚠️ Finnhub 主要支持美股财务数据，{ticker} 市场区域 {region} 可能不支持")
+    
+    return fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
+
+
+def _fetch_prices_from_akshare(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从 AKShare API 获取价格数据
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
+    print(f"🚀 使用 AKShare API 获取 {ticker} 价格数据 (市场: {region})")
+    
+    return get_prices_akshare(ticker, start_date, end_date)
+
+
+def _fetch_prices_from_rapidapi_yahoo(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从 Yahoo Finance RapidAPI 服务获取价格数据
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
+    print(f"🚀 使用 Yahoo Finance RapidAPI 获取 {ticker} 价格数据 (市场: {region})")
+    
+    return fetch_prices_from_rapidapi_yahoo(ticker, start_date, end_date, region)
 
 
 
+
+def _fetch_prices_from_finnhub(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从Finnhub API获取价格数据（实时报价）
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
+    try:
+        import finnhub
+        from datetime import datetime
+        
+        # 初始化Finnhub客户端
+        api_key = os.getenv('FINNHUB_API_KEY')
+        if not api_key:
+            print("⚠️ Finnhub API密钥未配置")
+            return []
+            
+        client = finnhub.Client(api_key=api_key)
+        
+        # Finnhub免费账户主要支持实时报价，历史数据有限
+        # 获取实时报价作为补充
+        quote_data = client.quote(ticker)
+        
+        if quote_data and quote_data.get('c'):
+            # 创建Price对象
+            current_time = datetime.now().strftime("%Y-%m-%d")
+            price = Price(
+                open=quote_data.get('o', 0),
+                close=quote_data.get('c', 0),
+                high=quote_data.get('h', 0),
+                low=quote_data.get('l', 0),
+                volume=quote_data.get('v', 0),
+                time=current_time
+            )
+            print(f"✅ Finnhub 成功获取 {ticker} 实时报价")
+            return [price]
+        else:
+            print(f"⚠️ Finnhub 未获取到 {ticker} 的有效报价数据")
+            return []
+            
+    except Exception as e:
+        print(f"❌ Finnhub价格数据获取失败: {str(e)}")
+        return []

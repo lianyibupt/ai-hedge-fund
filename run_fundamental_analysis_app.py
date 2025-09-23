@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-个性化交易分析系统主入口
-运行Streamlit Web应用
+基本面分析系统启动脚本
+独立的基本面分析应用，不依赖iTick数据源
 
 使用前准备:
 1. 安装依赖: poetry install
-2. 配置API密钥: 复制 .env.example 为 .env 并填入相关API密钥
+2. 配置API密钥: 在 .env 文件中设置 FINNHUB_API_KEY
 3. 确保Python版本 >= 3.10
 
 运行方式:
-- 直接运行: python run_personal_trading_app.py
-- 使用Poetry: poetry run python run_personal_trading_app.py
+- 直接运行: python run_fundamental_analysis_app.py
+- 使用Poetry: poetry run python run_fundamental_analysis_app.py
 """
 import os
 import sys
@@ -22,15 +22,18 @@ def check_dependencies():
         import streamlit
     except ImportError:
         print("❌ 缺少依赖包，请先安装:")
-        print("   poetry install")
-        print("   或者: pip install -r requirements.txt")
+        print("   方式1（推荐）: ./install_dependencies.sh")
+        print("   方式2: pip install -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements.txt")
+        print("   方式3: pip install -i https://pypi.tuna.tsinghua.edu.cn/simple streamlit pandas matplotlib plotly yfinance python-dotenv")
+        print("")
+        print("💡 使用国内镜像源可大幅提升下载速度")
         sys.exit(1)
     
     # 检查环境变量文件
     env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), '.env')
     if not os.path.exists(env_file):
         print("⚠️  警告: 未找到 .env 文件")
-        print("   请复制 .env.example 为 .env 并配置相关API密钥")
+        print("   请复制 .env.example 为 .env 并配置 FINNHUB_API_KEY")
         print("   系统将使用默认配置启动")
         print()
 
@@ -43,33 +46,34 @@ def main():
     current_dir = os.path.dirname(os.path.abspath(__file__))
     
     # 设置应用文件路径
-    app_file = os.path.join(current_dir, 'apps', 'web', 'personal_trading_app.py')
+    app_file = os.path.join(current_dir, 'apps', 'web', 'fundamental_analysis_app.py')
     
     if not os.path.exists(app_file):
         print(f"错误: 找不到应用文件 {app_file}")
         sys.exit(1)
     
     # 启动Streamlit应用
-    print("🚀 启动个性化交易分析系统...")
+    print("🚀 启动基本面分析系统...")
     print(f"📁 应用文件: {app_file}")
-    print("🌐 浏览器将自动打开 http://localhost:8501")
+    print("🌐 浏览器将自动打开 http://localhost:8502")
     print("")
     print("💡 使用提示:")
-    print("   - 确保已配置 API 密钥 (OpenAI, Groq, iTick等)")
-    print("   - 支持美股、港股、A股等多个市场")
-    print("   - 提供技术分析、基本面分析等功能")
+    print("   - 确保已配置 FINNHUB_API_KEY")
+    print("   - 专门针对美股基本面分析")
+    print("   - 不依赖iTick数据源，独立运行")
+    print("   - 提供五大模块专业分析")
     print("")
     print("按 Ctrl+C 退出")
     
     try:
         subprocess.run([
             sys.executable, '-m', 'streamlit', 'run', app_file,
-            '--server.port', '8501',
+            '--server.port', '8502',
             '--server.headless', 'false',
             '--browser.gatherUsageStats', 'false'
         ], check=True)
     except KeyboardInterrupt:
-        print("\n👋 应用已停止")
+        print("\n👋 基本面分析系统已停止")
     except subprocess.CalledProcessError as e:
         print(f"❌ 启动失败: {e}")
         sys.exit(1)

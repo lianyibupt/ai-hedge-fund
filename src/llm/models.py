@@ -48,16 +48,16 @@ class LLMModel(BaseModel):
         return self.model_name.startswith("gemini")
 
 
-# Define available models
+# Define available models (DeepSeek as default recommendation)
 AVAILABLE_MODELS = [
     LLMModel(
-        display_name="[deepseek] deepseek-r1",
-        model_name="deepseek-reasoner",
+        display_name="[推荐] deepseek-v3",
+        model_name="deepseek-chat",
         provider=ModelProvider.DEEPSEEK
     ),
     LLMModel(
-        display_name="[deepseek] deepseek-v3",
-        model_name="deepseek-chat",
+        display_name="[deepseek] deepseek-r1",
+        model_name="deepseek-reasoner",
         provider=ModelProvider.DEEPSEEK
     ),
     LLMModel(
@@ -76,6 +76,11 @@ AVAILABLE_MODELS = [
         provider=ModelProvider.ANTHROPIC
     ),
     LLMModel(
+        display_name="[groq] llama-3.3 70b",
+        model_name="llama-3.3-70b-versatile",
+        provider=ModelProvider.GROQ
+    ),
+    LLMModel(
         display_name="[gemini] gemini-2.0-flash",
         model_name="gemini-2.0-flash",
         provider=ModelProvider.GEMINI
@@ -86,18 +91,13 @@ AVAILABLE_MODELS = [
         provider=ModelProvider.GEMINI
     ),
     LLMModel(
-        display_name="[groq] llama-3.3 70b",
-        model_name="llama-3.3-70b-versatile",
-        provider=ModelProvider.GROQ
+        display_name="[openai] gpt-4o",
+        model_name="gpt-4o",
+        provider=ModelProvider.OPENAI
     ),
     LLMModel(
         display_name="[openai] gpt-4.5",
         model_name="gpt-4.5-preview",
-        provider=ModelProvider.OPENAI
-    ),
-    LLMModel(
-        display_name="[openai] gpt-4o",
-        model_name="gpt-4o",
         provider=ModelProvider.OPENAI
     ),
     LLMModel(
@@ -114,6 +114,18 @@ AVAILABLE_MODELS = [
 
 # Create LLM_ORDER in the format expected by the UI
 LLM_ORDER = [model.to_choice_tuple() for model in AVAILABLE_MODELS]
+
+# Default model configuration
+DEFAULT_MODEL_NAME = "deepseek-chat"
+DEFAULT_MODEL_PROVIDER = ModelProvider.DEEPSEEK
+
+def get_default_model() -> LLMModel:
+    """获取默认模型配置"""
+    return LLMModel(
+        display_name="[推荐] deepseek-v3",
+        model_name=DEFAULT_MODEL_NAME,
+        provider=DEFAULT_MODEL_PROVIDER
+    )
 
 def get_model_info(model_name: str) -> LLMModel | None:
     """Get model information by model_name"""

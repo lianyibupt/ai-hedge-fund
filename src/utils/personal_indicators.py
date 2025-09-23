@@ -453,6 +453,9 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
             'reason': '数据不足，无法进行技术分析'
         }
     
+    # 确保数据按日期正序排列（从旧到新），这是技术指标计算所必需的
+    prices_df = prices_df.sort_index(ascending=True)
+    
     # 计算各项技术指标
     macd_data = calculate_macd(prices_df)
     rsi = calculate_rsi(prices_df)
@@ -520,23 +523,23 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
         },
         'raw_data': {
             'macd_data': {
-                'dif': macd_data['dif'].iloc[-5:].tolist() if len(macd_data['dif']) >= 5 else macd_data['dif'].tolist(),
-                'dea': macd_data['dea'].iloc[-5:].tolist() if len(macd_data['dea']) >= 5 else macd_data['dea'].tolist(),
-                'macd': macd_data['macd'].iloc[-5:].tolist() if len(macd_data['macd']) >= 5 else macd_data['macd'].tolist()
+                'dif': macd_data['dif'].tolist(),  # 返回完整的DIF数据
+                'dea': macd_data['dea'].tolist(),  # 返回完整的DEA数据
+                'macd': macd_data['macd'].tolist()  # 返回完整的MACD数据
             },
-            'rsi_data': rsi.iloc[-5:].tolist() if len(rsi) >= 5 else rsi.tolist(),
+            'rsi_data': rsi.tolist(),  # 返回完整的RSI数据
             'bollinger_data': {
-                'upper': boll_data['upper'].iloc[-5:].tolist() if len(boll_data['upper']) >= 5 else boll_data['upper'].tolist(),
-                'middle': boll_data['middle'].iloc[-5:].tolist() if len(boll_data['middle']) >= 5 else boll_data['middle'].tolist(),
-                'lower': boll_data['lower'].iloc[-5:].tolist() if len(boll_data['lower']) >= 5 else boll_data['lower'].tolist()
+                'upper': boll_data['upper'].tolist(),  # 返回完整的布林带上轨数据
+                'middle': boll_data['middle'].tolist(),  # 返回完整的布林带中轨数据
+                'lower': boll_data['lower'].tolist()  # 返回完整的布林带下轨数据
             },
             'volume_data': {
-                'volume_ratio': volume_analysis['volume_ratio'].iloc[-5:].tolist() if len(volume_analysis['volume_ratio']) >= 5 else volume_analysis['volume_ratio'].tolist()
+                'volume_ratio': volume_analysis['volume_ratio'].tolist()  # 返回完整的成交量比率数据
             },
             'price_data': {
-                'close': prices_df['close'].iloc[-5:].tolist() if len(prices_df) >= 5 else prices_df['close'].tolist(),
-                'high': prices_df['high'].iloc[-5:].tolist() if len(prices_df) >= 5 else prices_df['high'].tolist(),
-                'low': prices_df['low'].iloc[-5:].tolist() if len(prices_df) >= 5 else prices_df['low'].tolist()
+                'close': prices_df['close'].tolist(),  # 返回完整收盘价数据
+                'high': prices_df['high'].tolist(),  # 返回完整最高价数据
+                'low': prices_df['low'].tolist()  # 返回完整最低价数据
             }
         }
     }

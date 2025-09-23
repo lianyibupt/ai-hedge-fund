@@ -190,8 +190,8 @@ def calculate_mean_reversion_signals(prices_df):
     rsi_14 = calculate_rsi(prices_df, 14)
     rsi_28 = calculate_rsi(prices_df, 28)
 
-    # Mean reversion signals
-    price_vs_bb = (prices_df["close"].iloc[-1] - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1])
+    # Mean reversion signals  
+    price_vs_bb = (prices_df["close"].iloc[0] - bb_lower.iloc[-1]) / (bb_upper.iloc[-1] - bb_lower.iloc[-1])  # 使用iloc[0]获取最新价格
 
     # Combine signals
     if z_score.iloc[-1] < -2 and price_vs_bb < 0.2:
