@@ -28,6 +28,9 @@ streamlit = "^1.36.0"
 yfinance = "^0.2.18"
 plotly = "^5.17.0"
 pydantic = "^2.0.0"
+# 主要数据源依赖
+akshare = "^1.12.0"  # 免费股票数据源
+finnhub-python = "^2.4.18"  # Finnhub API客户端
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"

@@ -168,46 +168,39 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
     # 3. 对缺失的日期范围请求API - 默认使用AKShare作为主要数据源
     new_prices = []
     for missing_start, missing_end in missing_ranges:
-        if api_source == "akshare":
-            print(f"🔄 从 AKShare API 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
+        # 定义数据源优先级：AKShare -> Finnhub -> RapidAPI Yahoo Finance
+        data_sources = [
+            ("AKShare", _fetch_prices_from_akshare),
+            ("Finnhub", _fetch_prices_from_finnhub),
+            ("RapidAPI Yahoo Finance", _fetch_prices_from_rapidapi_yahoo)
+        ]
+        
+        range_prices = []
+        last_error = None
+        
+        for source_name, fetch_func in data_sources:
+            print(f"🔄 尝试从 {source_name} 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
             try:
-                range_prices = _fetch_prices_from_akshare(ticker, missing_start, missing_end, region)
+                range_prices = fetch_func(ticker, missing_start, missing_end, region)
                 if range_prices:
                     new_prices.extend(range_prices)
-                    print(f"✅ AKShare 成功获取 {len(range_prices)} 条新数据")
+                    print(f"✅ {source_name} 成功获取 {len(range_prices)} 条新数据")
+                    break  # 成功获取数据，跳出循环
+                else:
+                    print(f"⚠️ {source_name} 返回空数据，尝试下一个数据源...")
             except Exception as e:
-                print(f"❌ AKShare API 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
-                print(f"🔄 尝试 RapidAPI Yahoo Finance 备用数据源...")
-                try:
-                    range_prices = _fetch_prices_from_rapidapi_yahoo(ticker, missing_start, missing_end, region)
-                    if range_prices:
-                        new_prices.extend(range_prices)
-                        print(f"✅ RapidAPI 备用获取 {len(range_prices)} 条新数据")
-                except Exception as backup_e:
-                    print(f"❌ RapidAPI 备用获取失败: {str(backup_e)}")
-                    print(f"❌ 详细错误: {type(backup_e).__name__}: {str(backup_e)}")
-                    # 继续处理其他日期范围
-                    continue
-        else:
-            print(f"🔄 从 RapidAPI Yahoo Finance 获取 {ticker} 缺失数据: {missing_start} 到 {missing_end} (市场: {region})")
-            try:
-                range_prices = _fetch_prices_from_rapidapi_yahoo(ticker, missing_start, missing_end, region)
-                if range_prices:
-                    new_prices.extend(range_prices)
-                    print(f"✅ RapidAPI 成功获取 {len(range_prices)} 条新数据")
-            except Exception as e:
-                print(f"❌ RapidAPI 获取 {missing_start} 到 {missing_end} 数据失败: {str(e)}")
-                print(f"🔄 尝试 AKShare 备用数据源...")
-                try:
-                    range_prices = _fetch_prices_from_akshare(ticker, missing_start, missing_end, region)
-                    if range_prices:
-                        new_prices.extend(range_prices)
-                        print(f"✅ AKShare 备用获取 {len(range_prices)} 条新数据")
-                except Exception as backup_e:
-                    print(f"❌ AKShare 备用获取失败: {str(backup_e)}")
-                    print(f"❌ 详细错误: {type(backup_e).__name__}: {str(backup_e)}")
-                # 继续处理其他日期范围
+                last_error = e
+                print(f"❌ {source_name} 获取数据失败: {str(e)}")
+                if source_name != data_sources[-1][0]:  # 不是最后一个数据源
+                    print(f"🔄 尝试下一个数据源...")
                 continue
+        
+        # 如果所有数据源都失败，记录警告但继续处理其他日期范围
+        if not range_prices:
+            print(f"⚠️ 所有数据源都无法获取 {ticker} 在 {missing_start} 到 {missing_end} 期间的价格数据")
+            if last_error:
+                print(f"   最后错误: {type(last_error).__name__}: {str(last_error)}")
+            # 继续处理其他日期范围，不中断服务
     
     # 4. 缓存新获取的数据
     if new_prices:
@@ -228,17 +221,14 @@ def _get_prices_intelligent_cache(ticker: str, start_date: str, end_date: str, r
     filtered_prices = [p for p in all_prices if start_date <= p.time <= end_date]
     
     if not filtered_prices:
-        # 提供更详细的错误信息
-        error_details = []
-        error_details.append(f"股票代码: {ticker}")
-        error_details.append(f"市场区域: {region}")
-        error_details.append(f"查询日期范围: {start_date} 到 {end_date}")
-        error_details.append(f"缓存数据: {len(all_cached_prices)} 条")
-        error_details.append(f"新获取数据: {len(new_prices)} 条")
-        error_details.append(f"缺失日期范围: {len(missing_ranges)} 个")
-        
-        error_msg = f"无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据\n" + "\n".join([f"  - {detail}" for detail in error_details])
-        raise Exception(error_msg)
+        # 改为记录警告而不是抛出异常，确保服务继续运行
+        print(f"⚠️ 警告：无法获取 {ticker} 在 {start_date} 到 {end_date} 期间的价格数据")
+        print(f"   市场区域: {region}")
+        print(f"   缓存数据: {len(all_cached_prices)} 条")
+        print(f"   新获取数据: {len(new_prices)} 条")
+        print(f"   缺失日期范围: {len(missing_ranges)} 个")
+        # 返回空列表而不是抛出异常，确保服务继续运行
+        return []
     
     cache_ratio = len(all_cached_prices) / len(filtered_prices) * 100 if filtered_prices else 0
     print(f"📊 {ticker} 数据获取完成: 总计 {len(filtered_prices)} 条 (缓存命中率: {cache_ratio:.1f}%)")
@@ -356,87 +346,30 @@ def get_financial_metrics(
     except Exception as e:
         print(f"⚠️ SQLite财务缓存读取失败: {str(e)}")
 
-    # 第三级：默认使用AKShare作为主要数据源获取财务指标
+    # 第三级：尝试多个数据源获取财务指标
+    data_sources = [
+        ("AKShare", _fetch_financial_metrics_from_akshare),
+        ("Finnhub", _fetch_financial_metrics_from_finnhub),
+        ("RapidAPI Yahoo Finance", _fetch_financial_metrics_from_rapidapi_yahoo)
+    ]
+    
+    # 根据api_source调整优先级
     if api_source == "akshare":
-        print(f"🔄 从 AKShare API 获取 {ticker} 的财务指标...")
-        try:
-            metrics = _fetch_financial_metrics_from_akshare(ticker, end_date, period, limit, region)
-            
-            if not metrics:
-                raise Exception(f"AKShare API 返回空财务数据，股票代码: {ticker}")
-                
-            print(f"✅ 成功从 AKShare API 获取到财务指标")
-            
-            # 存储到双级缓存
-            metric_dicts = [m.model_dump() for m in metrics]
-            _cache.set_financial_metrics(ticker, metric_dicts)  # 内存缓存
-            
-            try:
-                _db_manager.cache_financial_data(ticker, metric_dicts, cache_hours=24*7)  # SQLite缓存
-                print(f"💾 财务指标已缓存到SQLite数据库")
-            except Exception as cache_error:
-                print(f"⚠️ SQLite财务缓存存储失败: {str(cache_error)}")
-            
-            return metrics
-            
-        except Exception as e:
-            print(f"❌ AKShare API 获取财务指标失败: {str(e)}")
-            print(f"🔄 尝试 Finnhub API 备用数据源...")
-            try:
-                metrics = _fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
-                
-                if not metrics:
-                    raise Exception(f"Finnhub API 返回空财务数据，股票代码: {ticker}")
-                    
-                print(f"✅ 成功从 Finnhub API 获取到财务指标")
-                
-                # 存储到双级缓存
-                metric_dicts = [m.model_dump() for m in metrics]
-                _cache.set_financial_metrics(ticker, metric_dicts)  # 内存缓存
-                
-                try:
-                    _db_manager.cache_financial_data(ticker, metric_dicts, cache_hours=24*7)  # SQLite缓存
-                    print(f"💾 财务指标已缓存到SQLite数据库")
-                except Exception as cache_error:
-                    print(f"⚠️ SQLite财务缓存存储失败: {str(cache_error)}")
-                
-                return metrics
-                
-            except Exception as backup_e:
-                print(f"❌ Finnhub API 备用获取失败: {str(backup_e)}")
-                raise Exception(f"无法从 AKShare API 或 Finnhub API 获取 {ticker} 的财务指标: {str(backup_e)}")
+        # AKShare优先
+        data_sources = [data_sources[0], data_sources[1], data_sources[2]]
     else:
-        print(f"🔄 从 Finnhub API 获取 {ticker} 的财务指标...")
+        # Finnhub优先
+        data_sources = [data_sources[1], data_sources[0], data_sources[2]]
+    
+    last_error = None
+    
+    for source_name, fetch_func in data_sources:
+        print(f"🔄 从 {source_name} API 获取 {ticker} 的财务指标...")
         try:
-            metrics = _fetch_financial_metrics_from_finnhub(ticker, end_date, period, limit, region)
+            metrics = fetch_func(ticker, end_date, period, limit, region)
             
-            if not metrics:
-                raise Exception(f"Finnhub API 返回空财务数据，股票代码: {ticker}")
-                
-            print(f"✅ 成功从 Finnhub API 获取到财务指标")
-            
-            # 存储到双级缓存
-            metric_dicts = [m.model_dump() for m in metrics]
-            _cache.set_financial_metrics(ticker, metric_dicts)  # 内存缓存
-            
-            try:
-                _db_manager.cache_financial_data(ticker, metric_dicts, cache_hours=24*7)  # SQLite缓存
-                print(f"💾 财务指标已缓存到SQLite数据库")
-            except Exception as cache_error:
-                print(f"⚠️ SQLite财务缓存存储失败: {str(cache_error)}")
-            
-            return metrics
-            
-        except Exception as e:
-            print(f"❌ Finnhub API 获取财务指标失败: {str(e)}")
-            print(f"🔄 尝试 AKShare API 备用数据源...")
-            try:
-                metrics = _fetch_financial_metrics_from_akshare(ticker, end_date, period, limit, region)
-                
-                if not metrics:
-                    raise Exception(f"AKShare API 返回空财务数据，股票代码: {ticker}")
-                    
-                print(f"✅ 成功从 AKShare API 获取到财务指标")
+            if metrics:
+                print(f"✅ 成功从 {source_name} API 获取到财务指标")
                 
                 # 存储到双级缓存
                 metric_dicts = [m.model_dump() for m in metrics]
@@ -449,10 +382,22 @@ def get_financial_metrics(
                     print(f"⚠️ SQLite财务缓存存储失败: {str(cache_error)}")
                 
                 return metrics
+            else:
+                print(f"⚠️ {source_name} API 返回空财务数据，尝试下一个数据源...")
+                continue
                 
-            except Exception as backup_e:
-                print(f"❌ AKShare API 备用获取失败: {str(backup_e)}")
-                raise Exception(f"无法从 Finnhub API 或 AKShare API 获取 {ticker} 的财务指标: {str(backup_e)}")
+        except Exception as e:
+            last_error = e
+            print(f"❌ {source_name} API 获取财务指标失败: {str(e)}")
+            if source_name != data_sources[-1][0]:  # 不是最后一个数据源
+                print(f"🔄 尝试下一个数据源...")
+            continue
+    
+    # 所有数据源都失败时，记录警告并返回空列表
+    print(f"⚠️ 所有数据源都无法获取 {ticker} 的财务指标")
+    if last_error:
+        print(f"   最后错误: {type(last_error).__name__}: {str(last_error)}")
+    return []
 
 
 
@@ -709,3 +654,49 @@ def _fetch_prices_from_rapidapi_yahoo(ticker: str, start_date: str, end_date: st
 
 
 
+
+def _fetch_prices_from_finnhub(ticker: str, start_date: str, end_date: str, region: str = 'us') -> list[Price]:
+    """从Finnhub API获取价格数据（实时报价）
+    
+    Args:
+        ticker: 股票代码
+        start_date: 开始日期
+        end_date: 结束日期
+        region: 市场区域 (us, hk, sh, sz, sg, jp)
+    """
+    try:
+        import finnhub
+        from datetime import datetime
+        
+        # 初始化Finnhub客户端
+        api_key = os.getenv('FINNHUB_API_KEY')
+        if not api_key:
+            print("⚠️ Finnhub API密钥未配置")
+            return []
+            
+        client = finnhub.Client(api_key=api_key)
+        
+        # Finnhub免费账户主要支持实时报价，历史数据有限
+        # 获取实时报价作为补充
+        quote_data = client.quote(ticker)
+        
+        if quote_data and quote_data.get('c'):
+            # 创建Price对象
+            current_time = datetime.now().strftime("%Y-%m-%d")
+            price = Price(
+                open=quote_data.get('o', 0),
+                close=quote_data.get('c', 0),
+                high=quote_data.get('h', 0),
+                low=quote_data.get('l', 0),
+                volume=quote_data.get('v', 0),
+                time=current_time
+            )
+            print(f"✅ Finnhub 成功获取 {ticker} 实时报价")
+            return [price]
+        else:
+            print(f"⚠️ Finnhub 未获取到 {ticker} 的有效报价数据")
+            return []
+            
+    except Exception as e:
+        print(f"❌ Finnhub价格数据获取失败: {str(e)}")
+        return []
