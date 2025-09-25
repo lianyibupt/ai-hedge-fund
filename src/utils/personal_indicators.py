@@ -1,7 +1,7 @@
 """
 个性化技术指标计算模块
 支持2-3周交易周期的技术分析指标计算
-包含MACD、RSI、布林带和成交量分析
+包含MACD、RSI、布林带、成交量、ROC、随机指标和威廉指标分析
 """
 
 import pandas as pd
@@ -129,6 +129,82 @@ def calculate_volume_analysis(prices_df: pd.DataFrame, ma_period: int = 5) -> Di
         'latest_ratio': latest_volume_ratio,
         'is_volume_surge': latest_volume_ratio >= 1.5  # 1.5倍以上认为是放量
     }
+
+
+def calculate_roc(prices_df: pd.DataFrame, period: int = 12) -> pd.Series:
+    """
+    计算ROC（变动率指标）
+    
+    Args:
+        prices_df: 包含价格数据的DataFrame
+        period: ROC周期，默认12
+    
+    Returns:
+        ROC值的Series
+    """
+    close = prices_df['close']
+    
+    # 计算ROC = (当前收盘价 - N天前收盘价) / N天前收盘价 * 100
+    roc = ((close - close.shift(period)) / close.shift(period)) * 100
+    
+    return roc
+
+
+def calculate_stochastic(prices_df: pd.DataFrame, k_period: int = 14, d_period: int = 3) -> Dict[str, pd.Series]:
+    """
+    计算随机指标（KDJ指标）
+    
+    Args:
+        prices_df: 包含价格数据的DataFrame
+        k_period: K值周期，默认14
+        d_period: D值周期，默认3
+    
+    Returns:
+        包含K值和D值的字典
+    """
+    high = prices_df['high']
+    low = prices_df['low']
+    close = prices_df['close']
+    
+    # 计算最低价和最高价的N日最低和最高
+    lowest_low = low.rolling(window=k_period).min()
+    highest_high = high.rolling(window=k_period).max()
+    
+    # 计算%K值
+    k_value = ((close - lowest_low) / (highest_high - lowest_low)) * 100
+    
+    # 计算%D值（%K的3日移动平均）
+    d_value = k_value.rolling(window=d_period).mean()
+    
+    return {
+        'k': k_value,
+        'd': d_value
+    }
+
+
+def calculate_williams_r(prices_df: pd.DataFrame, period: int = 14) -> pd.Series:
+    """
+    计算威廉指标（W%R）
+    
+    Args:
+        prices_df: 包含价格数据的DataFrame
+        period: 威廉指标周期，默认14
+    
+    Returns:
+        威廉指标值的Series
+    """
+    high = prices_df['high']
+    low = prices_df['low']
+    close = prices_df['close']
+    
+    # 计算N日最高价和最低价
+    highest_high = high.rolling(window=period).max()
+    lowest_low = low.rolling(window=period).min()
+    
+    # 计算威廉指标
+    williams_r = ((highest_high - close) / (highest_high - lowest_low)) * -100
+    
+    return williams_r
 
 
 def analyze_macd_signals(macd_data: Dict[str, pd.Series]) -> Dict[str, Any]:
@@ -436,6 +512,270 @@ def analyze_volume_signals(volume_analysis: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def analyze_roc_signals(roc: pd.Series) -> Dict[str, Any]:
+    """
+    分析ROC交易信号
+    
+    Args:
+        roc: ROC计算结果
+    
+    Returns:
+        ROC信号分析结果
+    """
+    if len(roc) < 2:
+        return {
+            'signal': '中性',
+            'reason': '数据不足',
+            'current_roc': 0.0,
+            'prev_roc': 0.0,
+            'roc_trend': '平缓',
+            'is_oversold': False,
+            'is_overbought': False
+        }
+    
+    current_roc = roc.iloc[-1]
+    prev_roc = roc.iloc[-2]
+    
+    # 判断ROC趋势
+    if current_roc > prev_roc:
+        roc_trend = '上升'
+    elif current_roc < prev_roc:
+        roc_trend = '下降'
+    else:
+        roc_trend = '平缓'
+    
+    # 检测超买超卖
+    is_oversold = current_roc < -10  # ROC低于-10%为超卖
+    is_overbought = current_roc > 10  # ROC高于10%为超买
+    
+    # 生成信号
+    signal = '中性'
+    reason = ''
+    
+    if is_oversold and roc_trend == '上升':
+        signal = '看涨'
+        reason = f'ROC从超卖区({prev_roc:.1f}%)回升至{current_roc:.1f}%'
+    elif is_overbought and roc_trend == '下降':
+        signal = '看跌'
+        reason = f'ROC从超买区({prev_roc:.1f}%)回落至{current_roc:.1f}%'
+    elif current_roc > 0 and roc_trend == '上升':
+        signal = '看涨'
+        reason = f'ROC在零轴上方({current_roc:.1f}%)且上升'
+    elif current_roc < 0 and roc_trend == '下降':
+        signal = '看跌'
+        reason = f'ROC在零轴下方({current_roc:.1f}%)且下降'
+    elif is_oversold:
+        signal = '看涨'
+        reason = f'ROC处于超卖区({current_roc:.1f}%)'
+    elif is_overbought:
+        signal = '看跌'
+        reason = f'ROC处于超买区({current_roc:.1f}%)'
+    
+    return {
+        'signal': signal,
+        'reason': reason,
+        'current_roc': float(current_roc),
+        'prev_roc': float(prev_roc),
+        'roc_trend': roc_trend,
+        'is_oversold': bool(is_oversold),
+        'is_overbought': bool(is_overbought)
+    }
+
+
+def analyze_stochastic_signals(stoch_data: Dict[str, pd.Series]) -> Dict[str, Any]:
+    """
+    分析随机指标交易信号
+    
+    Args:
+        stoch_data: 随机指标计算结果
+    
+    Returns:
+        随机指标信号分析结果
+    """
+    k_value = stoch_data['k']
+    d_value = stoch_data['d']
+    
+    if len(k_value) < 2 or len(d_value) < 2:
+        return {
+            'signal': '中性',
+            'reason': '数据不足',
+            'current_k': 50.0,
+            'current_d': 50.0,
+            'k_d_cross': '无交叉',
+            'is_oversold': False,
+            'is_overbought': False
+        }
+    
+    current_k = k_value.iloc[-1]
+    prev_k = k_value.iloc[-2]
+    current_d = d_value.iloc[-1]
+    prev_d = d_value.iloc[-2]
+    
+    # 检测金叉和死叉
+    is_golden_cross = prev_k <= prev_d and current_k > current_d
+    is_death_cross = prev_k >= prev_d and current_k < current_d
+    
+    # 判断交叉类型
+    if is_golden_cross:
+        k_d_cross = '金叉'
+    elif is_death_cross:
+        k_d_cross = '死叉'
+    else:
+        k_d_cross = '无交叉'
+    
+    # 检测超买超卖
+    is_oversold = current_k < 20 and current_d < 20  # K和D都低于20为超卖
+    is_overbought = current_k > 80 and current_d > 80  # K和D都高于80为超买
+    
+    # 生成信号
+    signal = '中性'
+    reason = ''
+    
+    if is_golden_cross and is_oversold:
+        signal = '看涨'
+        reason = 'KDJ在超卖区形成金叉'
+    elif is_death_cross and is_overbought:
+        signal = '看跌'
+        reason = 'KDJ在超买区形成死叉'
+    elif is_golden_cross and current_k < 50:
+        signal = '看涨'
+        reason = 'KDJ在低位形成金叉'
+    elif is_death_cross and current_k > 50:
+        signal = '看跌'
+        reason = 'KDJ在高位形成死叉'
+    elif is_oversold:
+        signal = '看涨'
+        reason = 'KDJ处于超卖区'
+    elif is_overbought:
+        signal = '看跌'
+        reason = 'KDJ处于超买区'
+    
+    return {
+        'signal': signal,
+        'reason': reason,
+        'current_k': float(current_k),
+        'current_d': float(current_d),
+        'k_d_cross': k_d_cross,
+        'is_oversold': bool(is_oversold),
+        'is_overbought': bool(is_overbought)
+    }
+
+
+def analyze_williams_r_signals(williams_r: pd.Series) -> Dict[str, Any]:
+    """
+    分析威廉指标交易信号
+    
+    Args:
+        williams_r: 威廉指标计算结果
+    
+    Returns:
+        威廉指标信号分析结果
+    """
+    if len(williams_r) < 2:
+        return {
+            'signal': '中性',
+            'reason': '数据不足',
+            'current_wr': -50.0,
+            'prev_wr': -50.0,
+            'wr_trend': '平缓',
+            'is_oversold': False,
+            'is_overbought': False
+        }
+    
+    current_wr = williams_r.iloc[-1]
+    prev_wr = williams_r.iloc[-2]
+    
+    # 判断威廉指标趋势
+    if current_wr > prev_wr:
+        wr_trend = '上升'
+    elif current_wr < prev_wr:
+        wr_trend = '下降'
+    else:
+        wr_trend = '平缓'
+    
+    # 检测超买超卖（威廉指标与RSI相反）
+    is_oversold = current_wr < -80  # 低于-80为超卖
+    is_overbought = current_wr > -20  # 高于-20为超买
+    
+    # 生成信号
+    signal = '中性'
+    reason = ''
+    
+    if is_oversold and wr_trend == '上升':
+        signal = '看涨'
+        reason = f'威廉指标从超卖区({prev_wr:.1f})回升至{current_wr:.1f}'
+    elif is_overbought and wr_trend == '下降':
+        signal = '看跌'
+        reason = f'威廉指标从超买区({prev_wr:.1f})回落至{current_wr:.1f}'
+    elif is_oversold:
+        signal = '看涨'
+        reason = f'威廉指标处于超卖区({current_wr:.1f})'
+    elif is_overbought:
+        signal = '看跌'
+        reason = f'威廉指标处于超买区({current_wr:.1f})'
+    elif current_wr < -50 and wr_trend == '上升':
+        signal = '看涨'
+        reason = f'威廉指标在中轴下方({current_wr:.1f})且上升'
+    elif current_wr > -50 and wr_trend == '下降':
+        signal = '看跌'
+        reason = f'威廉指标在中轴上方({current_wr:.1f})且下降'
+    
+    return {
+        'signal': signal,
+        'reason': reason,
+        'current_wr': float(current_wr),
+        'prev_wr': float(prev_wr),
+        'wr_trend': wr_trend,
+        'is_oversold': bool(is_oversold),
+        'is_overbought': bool(is_overbought)
+    }
+
+
+def analyze_volume_signals(volume_analysis: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    分析成交量交易信号
+    
+    Args:
+        volume_analysis: 成交量分析结果
+    
+    Returns:
+        成交量信号分析结果
+    """
+    latest_ratio = volume_analysis['latest_ratio']
+    is_volume_surge = volume_analysis['is_volume_surge']
+    
+    signal = '中性'
+    reason = ''
+    
+    if is_volume_surge:
+        signal = '看涨'
+        reason = f'成交量放大{latest_ratio:.1f}倍，资金进场'
+    elif latest_ratio < 0.7:
+        signal = '看跌'
+        reason = f'成交量萎缩({latest_ratio:.1f}倍)，缺乏资金支持'
+    elif latest_ratio >= 1.2:
+        signal = '看涨'
+        reason = f'成交量温和放大({latest_ratio:.1f}倍)'
+    elif latest_ratio < 0.8:
+        signal = '看跌'
+        reason = f'成交量偏低({latest_ratio:.1f}倍)'
+    
+    # 获取最新成交量数据
+    volume_ma = volume_analysis['volume_ma']
+    current_volume = volume_ma.iloc[-1] * latest_ratio if len(volume_ma) > 0 else 0
+    avg_volume = volume_ma.iloc[-1] if len(volume_ma) > 0 else 0
+    
+    return {
+        'signal': signal,
+        'reason': reason,
+        'volume_ratio': float(latest_ratio),
+        'is_surge': bool(is_volume_surge),
+        'current_volume': float(current_volume),
+        'avg_volume': float(avg_volume),
+        'volume_trend': '放量' if latest_ratio >= 1.2 else '缩量' if latest_ratio < 0.8 else '正常'
+    }
+
+
 def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
     """
     基于个人交易策略生成综合交易信号
@@ -461,24 +801,33 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
     rsi = calculate_rsi(prices_df)
     boll_data = calculate_bollinger_bands(prices_df)
     volume_analysis = calculate_volume_analysis(prices_df)
+    roc = calculate_roc(prices_df)
+    stoch_data = calculate_stochastic(prices_df)
+    williams_r = calculate_williams_r(prices_df)
     
     # 分析各项信号
     macd_signals = analyze_macd_signals(macd_data)
     rsi_signals = analyze_rsi_signals(rsi)
     boll_signals = analyze_bollinger_signals(prices_df, boll_data)
     volume_signals = analyze_volume_signals(volume_analysis)
+    roc_signals = analyze_roc_signals(roc)
+    stoch_signals = analyze_stochastic_signals(stoch_data)
+    williams_r_signals = analyze_williams_r_signals(williams_r)
     
-    # 信号权重
+    # 信号权重（调整为7个指标，总权重为1.0）
     weights = {
-        'macd': 0.3,
-        'rsi': 0.25,
-        'boll': 0.25,
-        'volume': 0.2
+        'macd': 0.20,      # MACD权重降低
+        'rsi': 0.15,       # RSI权重降低
+        'boll': 0.15,      # 布林带权重降低
+        'volume': 0.10,    # 成交量权重降低
+        'roc': 0.15,       # ROC指标权重
+        'stoch': 0.15,     # 随机指标权重
+        'williams_r': 0.10 # 威廉指标权重
     }
     
     # 计算综合信号
-    signals = [macd_signals, rsi_signals, boll_signals, volume_signals]
-    signal_names = ['macd', 'rsi', 'boll', 'volume']
+    signals = [macd_signals, rsi_signals, boll_signals, volume_signals, roc_signals, stoch_signals, williams_r_signals]
+    signal_names = ['macd', 'rsi', 'boll', 'volume', 'roc', 'stoch', 'williams_r']
     
     bullish_score = 0
     bearish_score = 0
@@ -515,7 +864,10 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
             'macd': macd_signals,
             'rsi': rsi_signals,
             'bollinger': boll_signals,
-            'volume': volume_signals
+            'volume': volume_signals,
+            'roc': roc_signals,
+            'stochastic': stoch_signals,
+            'williams_r': williams_r_signals
         },
         'scores': {
             'bullish_score': round(bullish_score, 2),
@@ -536,6 +888,12 @@ def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
             'volume_data': {
                 'volume_ratio': volume_analysis['volume_ratio'].tolist()  # 返回完整的成交量比率数据
             },
+            'roc_data': roc.tolist(),  # 返回完整的ROC数据
+            'stochastic_data': {
+                'k': stoch_data['k'].tolist(),  # 返回完整的K值数据
+                'd': stoch_data['d'].tolist()   # 返回完整的D值数据
+            },
+            'williams_r_data': williams_r.tolist(),  # 返回完整的威廉指标数据
             'price_data': {
                 'close': prices_df['close'].tolist(),  # 返回完整收盘价数据
                 'high': prices_df['high'].tolist(),  # 返回完整最高价数据

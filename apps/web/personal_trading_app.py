@@ -540,12 +540,9 @@ def generate_trading_recommendation(analysis_result):
 
 def create_price_chart(prices_df, ticker, analysis):
     """
-    创建价格图表，只显示有实际交易数据的日期
+    创建价格图表，显示所有技术指标
     """
     # 严格的过滤条件，确保只显示有效交易数据
-    # 1. 成交量大于0
-    # 2. 价格数据有效（不为NaN或None）
-    # 3. 价格数据大于0
     filtered_prices_df = prices_df[
         (prices_df['volume'] > 0) & 
         (prices_df['open'].notna()) & 
@@ -563,13 +560,21 @@ def create_price_chart(prices_df, ticker, analysis):
         filtered_prices_df.index = pd.to_datetime(filtered_prices_df.index, format='mixed', errors='coerce')
         filtered_prices_df = filtered_prices_df.sort_index()
     
-    # 创建子图
+    # 创建更复杂的子图布局来显示所有7个指标
     fig = make_subplots(
-        rows=4, cols=1,
+        rows=7, cols=1,
         shared_xaxes=True,
-        vertical_spacing=0.05,
-        subplot_titles=(f'{ticker} 股价走势', 'MACD', 'RSI', '成交量'),
-        row_heights=[0.5, 0.2, 0.15, 0.15]
+        vertical_spacing=0.03,
+        subplot_titles=(
+            f'{ticker} 股价走势', 
+            'MACD', 
+            'RSI', 
+            '布林带',
+            'ROC',
+            '随机指标(KDJ)',
+            '威廉指标'
+        ),
+        row_heights=[0.25, 0.15, 0.1, 0.1, 0.1, 0.15, 0.15]
     )
     
     # 主图：价格和布林带（只在有数据时添加）
@@ -616,17 +621,14 @@ def create_price_chart(prices_df, ticker, analysis):
                     row=1, col=1
                 )
     
-    # MACD图（确保索引匹配且数据有效）
+    # MACD图
     if 'raw_data' in analysis and 'macd_data' in analysis['raw_data'] and not filtered_prices_df.empty:
         macd_data = analysis['raw_data']['macd_data']
-        # 使用过滤后的价格数据索引，确保只显示有交易的数据点
         macd_dates = filtered_prices_df.index
         
-        # 确保技术指标数据长度与价格数据匹配
         if len(macd_data['dif']) > 0 and len(macd_data['dea']) > 0 and len(macd_data['macd']) > 0:
             min_length = min(len(macd_data['dif']), len(macd_dates))
             if min_length > 0:
-                # 取最近的数据点
                 recent_dates = macd_dates[-min_length:]
                 dif_data = macd_data['dif'][-min_length:]
                 dea_data = macd_data['dea'][-min_length:]
@@ -639,15 +641,13 @@ def create_price_chart(prices_df, ticker, analysis):
                     for i in range(len(dif_data))
                 ]
                 
-                # 确保有足够的有效数据点
                 valid_count = sum(valid_mask)
-                if valid_count > 1:  # 至少需要2个数据点
+                if valid_count > 1:
                     valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
                     valid_dif = [dif_data[i] for i in range(len(dif_data)) if valid_mask[i]]
                     valid_dea = [dea_data[i] for i in range(len(dea_data)) if valid_mask[i]]
                     valid_macd = [macd_bar_data[i] for i in range(len(macd_bar_data)) if valid_mask[i]]
                     
-                    # 添加MACD指标，只显示有交易的数据点
                     fig.add_trace(
                         go.Scatter(x=valid_dates, y=valid_dif, 
                                   name='DIF', line=dict(color='blue')),
@@ -664,73 +664,191 @@ def create_price_chart(prices_df, ticker, analysis):
                         row=2, col=1
                     )
     
-    # RSI图（确保索引匹配且数据有效）
+    # RSI图
     if 'raw_data' in analysis and 'rsi_data' in analysis['raw_data'] and not filtered_prices_df.empty:
         rsi_data = analysis['raw_data']['rsi_data']
-        # 使用过滤后的价格数据索引，确保只显示有交易的数据点
         rsi_dates = filtered_prices_df.index
         
-        # 确保技术指标数据长度与价格数据匹配
         min_length = min(len(rsi_data), len(rsi_dates))
         if min_length > 0:
-            # 取最近的数据点
             recent_dates = rsi_dates[-min_length:]
             rsi_values = rsi_data[-min_length:]
             
-            # 过滤掉NaN值和无效值（0-100范围外的值）
             valid_mask = [
                 pd.notna(x) and 0 <= x <= 100 and np.isfinite(x)
                 for x in rsi_values
             ]
             
-            # 确保有足够的有效数据点
             valid_count = sum(valid_mask)
-            if valid_count > 1:  # 至少需要2个数据点
+            if valid_count > 1:
                 valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
                 valid_rsi = [rsi_values[i] for i in range(len(rsi_values)) if valid_mask[i]]
                 
-                # 添加RSI指标，只显示有交易的数据点
                 fig.add_trace(
                     go.Scatter(x=valid_dates, y=valid_rsi, 
                               name='RSI', line=dict(color='purple')),
                     row=3, col=1
                 )
-                # 添加超买超卖线
                 fig.add_hline(y=70, line_dash="dash", line_color="red", annotation_text="超买线", row=3, col=1)
                 fig.add_hline(y=30, line_dash="dash", line_color="green", annotation_text="超卖线", row=3, col=1)
     
-    # 成交量图（只显示有交易的日期）
-    if not filtered_prices_df.empty:
-        fig.add_trace(
-            go.Bar(
-                x=filtered_prices_df.index,
-                y=filtered_prices_df['volume'],
-                name='成交量',
-                marker_color='lightblue'
-            ),
-            row=4, col=1
-        )
+    # 布林带图（单独显示）
+    if 'raw_data' in analysis and 'bollinger_data' in analysis['raw_data'] and not filtered_prices_df.empty:
+        boll_data = analysis['raw_data']['bollinger_data']
+        boll_dates = filtered_prices_df.index
+        
+        if len(boll_data['upper']) > 0 and len(boll_data['middle']) > 0 and len(boll_data['lower']) > 0:
+            min_length = min(len(boll_data['upper']), len(boll_dates))
+            if min_length > 0:
+                recent_dates = boll_dates[-min_length:]
+                upper_data = boll_data['upper'][-min_length:]
+                middle_data = boll_data['middle'][-min_length:]
+                lower_data = boll_data['lower'][-min_length:]
+                
+                valid_mask = [
+                    pd.notna(upper_data[i]) and pd.notna(middle_data[i]) and pd.notna(lower_data[i]) and
+                    np.isfinite(upper_data[i]) and np.isfinite(middle_data[i]) and np.isfinite(lower_data[i])
+                    for i in range(len(upper_data))
+                ]
+                
+                valid_count = sum(valid_mask)
+                if valid_count > 1:
+                    valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                    valid_upper = [upper_data[i] for i in range(len(upper_data)) if valid_mask[i]]
+                    valid_middle = [middle_data[i] for i in range(len(middle_data)) if valid_mask[i]]
+                    valid_lower = [lower_data[i] for i in range(len(lower_data)) if valid_mask[i]]
+                    
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_upper, 
+                                  name='上轨', line=dict(color='red', dash='dash')),
+                        row=4, col=1
+                    )
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_middle, 
+                                  name='中轨', line=dict(color='blue')),
+                        row=4, col=1
+                    )
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_lower, 
+                                  name='下轨', line=dict(color='green', dash='dash')),
+                        row=4, col=1
+                    )
+    
+    # ROC图
+    if 'raw_data' in analysis and 'roc_data' in analysis['raw_data'] and not filtered_prices_df.empty:
+        roc_data = analysis['raw_data']['roc_data']
+        roc_dates = filtered_prices_df.index
+        
+        min_length = min(len(roc_data), len(roc_dates))
+        if min_length > 0:
+            recent_dates = roc_dates[-min_length:]
+            roc_values = roc_data[-min_length:]
+            
+            valid_mask = [
+                pd.notna(x) and np.isfinite(x)
+                for x in roc_values
+            ]
+            
+            valid_count = sum(valid_mask)
+            if valid_count > 1:
+                valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                valid_roc = [roc_values[i] for i in range(len(roc_values)) if valid_mask[i]]
+                
+                fig.add_trace(
+                    go.Scatter(x=valid_dates, y=valid_roc, 
+                              name='ROC', line=dict(color='orange')),
+                    row=5, col=1
+                )
+                fig.add_hline(y=0, line_dash="dash", line_color="gray", row=5, col=1)
+    
+    # 随机指标图
+    if 'raw_data' in analysis and 'stochastic_data' in analysis['raw_data'] and not filtered_prices_df.empty:
+        stoch_data = analysis['raw_data']['stochastic_data']
+        stoch_dates = filtered_prices_df.index
+        
+        if len(stoch_data['k']) > 0 and len(stoch_data['d']) > 0:
+            min_length = min(len(stoch_data['k']), len(stoch_dates))
+            if min_length > 0:
+                recent_dates = stoch_dates[-min_length:]
+                k_data = stoch_data['k'][-min_length:]
+                d_data = stoch_data['d'][-min_length:]
+                
+                valid_mask = [
+                    pd.notna(k_data[i]) and pd.notna(d_data[i]) and
+                    np.isfinite(k_data[i]) and np.isfinite(d_data[i])
+                    for i in range(len(k_data))
+                ]
+                
+                valid_count = sum(valid_mask)
+                if valid_count > 1:
+                    valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                    valid_k = [k_data[i] for i in range(len(k_data)) if valid_mask[i]]
+                    valid_d = [d_data[i] for i in range(len(d_data)) if valid_mask[i]]
+                    
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_k, 
+                                  name='K值', line=dict(color='red')),
+                        row=6, col=1
+                    )
+                    fig.add_trace(
+                        go.Scatter(x=valid_dates, y=valid_d, 
+                                  name='D值', line=dict(color='blue')),
+                        row=6, col=1
+                    )
+                    fig.add_hline(y=80, line_dash="dash", line_color="red", annotation_text="超买", row=6, col=1)
+                    fig.add_hline(y=20, line_dash="dash", line_color="green", annotation_text="超卖", row=6, col=1)
+    
+    # 威廉指标图
+    if 'raw_data' in analysis and 'williams_r_data' in analysis['raw_data'] and not filtered_prices_df.empty:
+        williams_r_data = analysis['raw_data']['williams_r_data']
+        wr_dates = filtered_prices_df.index
+        
+        min_length = min(len(williams_r_data), len(wr_dates))
+        if min_length > 0:
+            recent_dates = wr_dates[-min_length:]
+            wr_values = williams_r_data[-min_length:]
+            
+            valid_mask = [
+                pd.notna(x) and np.isfinite(x)
+                for x in wr_values
+            ]
+            
+            valid_count = sum(valid_mask)
+            if valid_count > 1:
+                valid_dates = [recent_dates[i] for i in range(len(recent_dates)) if valid_mask[i]]
+                valid_wr = [wr_values[i] for i in range(len(wr_values)) if valid_mask[i]]
+                
+                fig.add_trace(
+                    go.Scatter(x=valid_dates, y=valid_wr, 
+                              name='W%R', line=dict(color='purple')),
+                    row=7, col=1
+                )
+                fig.add_hline(y=-20, line_dash="dash", line_color="red", annotation_text="超买", row=7, col=1)
+                fig.add_hline(y=-80, line_dash="dash", line_color="green", annotation_text="超卖", row=7, col=1)
     
     # 更新图表布局
     fig.update_layout(
-        height=800,
+        height=1200,
         showlegend=True,
-        title_text=f"{ticker} 技术分析图表",
-        xaxis_rangeslider_visible=False,  # 隐藏范围滑块以减少混乱
+        title_text=f"{ticker} 技术分析图表（7个指标）",
+        xaxis_rangeslider_visible=False,
     )
     
     # 更新Y轴标题
     fig.update_yaxes(title_text="价格", row=1, col=1)
     fig.update_yaxes(title_text="MACD", row=2, col=1)
     fig.update_yaxes(title_text="RSI", row=3, col=1)
-    fig.update_yaxes(title_text="成交量", row=4, col=1)
+    fig.update_yaxes(title_text="布林带", row=4, col=1)
+    fig.update_yaxes(title_text="ROC", row=5, col=1)
+    fig.update_yaxes(title_text="KDJ", row=6, col=1)
+    fig.update_yaxes(title_text="W%R", row=7, col=1)
     
-    # 确保X轴只显示有数据的日期，使数值连续显示
+    # 确保X轴只显示有数据的日期
     if not filtered_prices_df.empty:
         fig.update_xaxes(
             type='date',
             tickformat='%Y-%m-%d',
-            row=4, col=1
+            row=7, col=1
         )
     
     return fig
@@ -738,66 +856,148 @@ def create_price_chart(prices_df, ticker, analysis):
 
 def display_detailed_indicators(analysis):
     """
-    显示详细技术指标
+    显示详细技术指标（7个指标）
     """
-    st.subheader("📊 详细技术指标数据")
+    st.subheader("📊 详细技术指标数据（7个指标）")
     
-    # 创建四列布局
-    col1, col2, col3, col4 = st.columns(4)
+    # 检查details字典是否存在
+    if 'details' not in analysis:
+        st.warning("⚠️ 数据不足，无法显示详细指标数据")
+        return
+    
+    details = analysis['details']
+    
+    # 创建两行布局，每行4列，共7个指标
+    row1_col1, row1_col2, row1_col3, row1_col4 = st.columns(4)
+    row2_col1, row2_col2, row2_col3, row2_col4 = st.columns(4)
     
     # MACD详细数据
-    with col1:
+    with row1_col1:
         st.markdown("### 📈 MACD指标")
-        macd_details = analysis['details']['macd']
+        macd_details = details.get('macd', {})
         
-        st.metric("当前DIF", f"{macd_details['current_dif']:.4f}")
-        st.metric("当前DEA", f"{macd_details['current_dea']:.4f}")
-        st.metric("MACD柱状图", f"{macd_details['macd_histogram']:.4f}")
-        
-        st.write(f"**DIF趋势:** {macd_details['dif_trend']}")
-        st.write(f"**DIF在0轴上方:** {'是' if macd_details['dif_above_zero'] else '否'}")
-        st.write(f"**金叉:** {'是' if macd_details['is_golden_cross'] else '否'}")
-        st.write(f"**死叉:** {'是' if macd_details['is_death_cross'] else '否'}")
+        if macd_details:
+            st.metric("当前DIF", f"{macd_details.get('current_dif', 0):.4f}")
+            st.metric("当前DEA", f"{macd_details.get('current_dea', 0):.4f}")
+            st.metric("MACD柱状图", f"{macd_details.get('macd_histogram', 0):.4f}")
+            
+            st.write(f"**DIF趋势:** {macd_details.get('dif_trend', '未知')}")
+            st.write(f"**DIF在0轴上方:** {'是' if macd_details.get('dif_above_zero', False) else '否'}")
+            st.write(f"**金叉:** {'是' if macd_details.get('is_golden_cross', False) else '否'}")
+            st.write(f"**死叉:** {'是' if macd_details.get('is_death_cross', False) else '否'}")
+        else:
+            st.warning("MACD数据不可用")
     
     # RSI详细数据
-    with col2:
+    with row1_col2:
         st.markdown("### 📊 RSI指标")
-        rsi_details = analysis['details']['rsi']
+        rsi_details = details.get('rsi', {})
         
-        st.metric("当前RSI", f"{rsi_details['current_rsi']:.2f}")
-        st.metric("前一期RSI", f"{rsi_details['prev_rsi']:.2f}")
-        
-        st.write(f"**RSI趋势:** {rsi_details['rsi_trend']}")
-        st.write(f"**超买状态:** {'是' if rsi_details['is_overbought'] else '否'}")
-        st.write(f"**超卖状态:** {'是' if rsi_details['is_oversold'] else '否'}")
-        st.write(f"**超卖恢复:** {'是' if rsi_details['is_oversold_recovery'] else '否'}")
-        st.write(f"**超买回落:** {'是' if rsi_details['is_overbought_decline'] else '否'}")
+        if rsi_details:
+            st.metric("当前RSI", f"{rsi_details.get('current_rsi', 50):.2f}")
+            st.metric("前一期RSI", f"{rsi_details.get('prev_rsi', 50):.2f}")
+            
+            st.write(f"**RSI趋势:** {rsi_details.get('rsi_trend', '未知')}")
+            st.write(f"**超买状态:** {'是' if rsi_details.get('is_overbought', False) else '否'}")
+            st.write(f"**超卖状态:** {'是' if rsi_details.get('is_oversold', False) else '否'}")
+            st.write(f"**超卖恢复:** {'是' if rsi_details.get('is_oversold_recovery', False) else '否'}")
+            st.write(f"**超买回落:** {'是' if rsi_details.get('is_overbought_decline', False) else '否'}")
+        else:
+            st.warning("RSI数据不可用")
     
     # 布林带详细数据
-    with col3:
+    with row1_col3:
         st.markdown("### 📉 布林带指标")
-        boll_details = analysis['details']['bollinger']
+        boll_details = details.get('bollinger', {})
         
-        st.metric("当前价格", f"{boll_details['current_close']:.2f}")
-        st.metric("上轨", f"{boll_details['current_upper']:.2f}")
-        st.metric("中轨", f"{boll_details['current_middle']:.2f}")
-        st.metric("下轨", f"{boll_details['current_lower']:.2f}")
-        
-        st.write(f"**带宽:** {boll_details['band_width']:.2f}%")
-        st.write(f"**价格位置:** {boll_details['price_position']:.2%}")
-        st.write(f"**中轨趋势:** {boll_details['middle_trend']}")
+        if boll_details:
+            st.metric("当前价格", f"{boll_details.get('current_close', 0):.2f}")
+            st.metric("上轨", f"{boll_details.get('current_upper', 0):.2f}")
+            st.metric("中轨", f"{boll_details.get('current_middle', 0):.2f}")
+            st.metric("下轨", f"{boll_details.get('current_lower', 0):.2f}")
+            
+            st.write(f"**带宽:** {boll_details.get('band_width', 0):.2f}%")
+            st.write(f"**价格位置:** {boll_details.get('price_position', 0.5):.2%}")
+            st.write(f"**中轨趋势:** {boll_details.get('middle_trend', '未知')}")
+        else:
+            st.warning("布林带数据不可用")
     
     # 成交量详细数据
-    with col4:
+    with row1_col4:
         st.markdown("### 📊 成交量指标")
-        volume_details = analysis['details']['volume']
+        volume_details = details.get('volume', {})
         
-        st.metric("当前成交量", f"{volume_details['current_volume']:,.0f}")
-        st.metric("平均成交量", f"{volume_details['avg_volume']:,.0f}")
-        st.metric("成交量比率", f"{volume_details['volume_ratio']:.2f}")
+        if volume_details:
+            st.metric("当前成交量", f"{volume_details.get('current_volume', 0):,.0f}")
+            st.metric("平均成交量", f"{volume_details.get('avg_volume', 0):,.0f}")
+            st.metric("成交量比率", f"{volume_details.get('volume_ratio', 1):.2f}")
+            
+            st.write(f"**成交量趋势:** {volume_details.get('volume_trend', '未知')}")
+            st.write(f"**放量:** {'是' if volume_details.get('is_surge', False) else '否'}")
+        else:
+            st.warning("成交量数据不可用")
+    
+    # ROC详细数据
+    with row2_col1:
+        st.markdown("### 📈 ROC指标")
+        roc_details = details.get('roc', {})
         
-        st.write(f"**成交量趋势:** {volume_details['volume_trend']}")
-        st.write(f"**放量:** {'是' if volume_details['is_surge'] else '否'}")
+        if roc_details:
+            st.metric("当前ROC", f"{roc_details.get('current_roc', 0):.2f}%")
+            st.metric("前一期ROC", f"{roc_details.get('prev_roc', 0):.2f}%")
+            
+            st.write(f"**ROC趋势:** {roc_details.get('roc_trend', '未知')}")
+            st.write(f"**超买状态:** {'是' if roc_details.get('is_overbought', False) else '否'}")
+            st.write(f"**超卖状态:** {'是' if roc_details.get('is_oversold', False) else '否'}")
+        else:
+            st.warning("ROC数据不可用")
+    
+    # 随机指标详细数据
+    with row2_col2:
+        st.markdown("### 📊 随机指标(KDJ)")
+        stoch_details = details.get('stochastic', {})
+        
+        if stoch_details:
+            st.metric("当前K值", f"{stoch_details.get('current_k', 50):.2f}")
+            st.metric("当前D值", f"{stoch_details.get('current_d', 50):.2f}")
+            
+            st.write(f"**K-D交叉:** {stoch_details.get('k_d_cross', '无交叉')}")
+            st.write(f"**超买状态:** {'是' if stoch_details.get('is_overbought', False) else '否'}")
+            st.write(f"**超卖状态:** {'是' if stoch_details.get('is_oversold', False) else '否'}")
+        else:
+            st.warning("随机指标数据不可用")
+    
+    # 威廉指标详细数据
+    with row2_col3:
+        st.markdown("### 📉 威廉指标")
+        williams_r_details = details.get('williams_r', {})
+        
+        if williams_r_details:
+            st.metric("当前W%R", f"{williams_r_details.get('current_wr', -50):.2f}")
+            st.metric("前一期W%R", f"{williams_r_details.get('prev_wr', -50):.2f}")
+            
+            st.write(f"**威廉指标趋势:** {williams_r_details.get('wr_trend', '未知')}")
+            st.write(f"**超买状态:** {'是' if williams_r_details.get('is_overbought', False) else '否'}")
+            st.write(f"**超卖状态:** {'是' if williams_r_details.get('is_oversold', False) else '否'}")
+        else:
+            st.warning("威廉指标数据不可用")
+
+    # 指标权重说明
+    with row2_col4:
+        st.markdown("### ⚖️ 指标权重")
+        st.write("**综合信号权重分配:**")
+        st.write("- MACD: 20%")
+        st.write("- RSI: 15%")
+        st.write("- 布林带: 15%")
+        st.write("- 成交量: 10%")
+        st.write("- ROC: 15%")
+        st.write("- 随机指标: 15%")
+        st.write("- 威廉指标: 10%")
+        
+        st.write("**信号生成规则:**")
+        st.write("- 看涨信号: 权重总和 ≥ 50%")
+        st.write("- 看跌信号: 权重总和 ≥ 50%")
+        st.write("- 中性信号: 权重总和 < 50%")
 
 
 def display_fundamental_analysis(fundamental_result):
@@ -868,13 +1068,13 @@ def display_fundamental_analysis(fundamental_result):
 
 def display_historical_data(analysis):
     """
-    显示历史数据
+    显示历史数据（包含所有7个指标）
     """
     if 'raw_data' not in analysis:
         st.warning("历史数据不可用")
         return
     
-    st.subheader("📈 历史数据（最近5期）")
+    st.subheader("📈 历史数据（最近5期，7个指标）")
     raw_data = analysis['raw_data']
     
     # 创建表格数据
@@ -907,6 +1107,31 @@ def display_historical_data(analysis):
         'RSI': [f"{rsi:.2f}" for rsi in raw_data['rsi_data']]
     }
     st.table(pd.DataFrame(rsi_data))
+    
+    # ROC数据表格
+    st.markdown("#### ROC数据")
+    roc_data = {
+        '期数': periods,
+        'ROC': [f"{roc:.2f}%" for roc in raw_data['roc_data']]
+    }
+    st.table(pd.DataFrame(roc_data))
+    
+    # 随机指标数据表格
+    st.markdown("#### 随机指标(KDJ)数据")
+    stoch_data = {
+        '期数': periods,
+        'K值': [f"{k:.2f}" for k in raw_data['stochastic_data']['k']],
+        'D值': [f"{d:.2f}" for d in raw_data['stochastic_data']['d']]
+    }
+    st.table(pd.DataFrame(stoch_data))
+    
+    # 威廉指标数据表格
+    st.markdown("#### 威廉指标数据")
+    williams_r_data = {
+        '期数': periods,
+        'W%R': [f"{wr:.2f}" for wr in raw_data['williams_r_data']]
+    }
+    st.table(pd.DataFrame(williams_r_data))
 
 
 def main():
@@ -1089,24 +1314,44 @@ def main():
                         display_fundamental_analysis(result['fundamental_analysis'])
                     
                     # 详细指标分析
-                    st.subheader("📋 各指标信号")
+                    st.subheader("📋 各指标信号（7个指标）")
                     details = analysis['details']
                     
-                    indicator_cols = st.columns(4)
-                    indicators = [
+                    # 创建两行布局，第一行4个指标，第二行3个指标
+                    row1_cols = st.columns(4)
+                    row2_cols = st.columns(3)
+                    
+                    # 第一行指标
+                    indicators_row1 = [
                         ('MACD', details['macd']),
                         ('RSI', details['rsi']),
                         ('布林带', details['bollinger']),
                         ('成交量', details['volume'])
                     ]
                     
-                    for idx, (name, data) in enumerate(indicators):
-                        with indicator_cols[idx]:
+                    # 第二行指标
+                    indicators_row2 = [
+                        ('ROC', details['roc']),
+                        ('随机指标', details['stochastic']),
+                        ('威廉指标', details['williams_r'])
+                    ]
+                    
+                    # 显示第一行指标
+                    for idx, (name, data) in enumerate(indicators_row1):
+                        with row1_cols[idx]:
                             signal_class = "bullish" if data['signal'] == '看涨' else "bearish" if data['signal'] == '看跌' else "neutral"
                             st.markdown(f"**{name}**")
                             st.markdown(f"<span class='{signal_class}'>{data['signal']}</span>", unsafe_allow_html=True)
                             st.caption(data['reason'])
                     
+                    # 显示第二行指标
+                    for idx, (name, data) in enumerate(indicators_row2):
+                        with row2_cols[idx]:
+                            signal_class = "bullish" if data['signal'] == '看涨' else "bearish" if data['signal'] == '看跌' else "neutral"
+                            st.markdown(f"**{name}**")
+                            st.markdown(f"<span class='{signal_class}'>{data['signal']}</span>", unsafe_allow_html=True)
+                            st.caption(data['reason'])
+
                     # 图表显示
                     if 'prices_df' in result:
                         st.subheader("📈 技术分析图表")
