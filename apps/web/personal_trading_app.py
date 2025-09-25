@@ -240,10 +240,10 @@ with st.sidebar:
     st.subheader("🔧 分析选项")
     
     # 基本面分析选项
-    enable_fundamental_analysis = st.checkbox("启用基本面分析", value=True, help="基于财务指标的五模块分析")
+    enable_fundamental_analysis = st.checkbox("启用基本面分析", value=False, help="基于财务指标的五模块分析")
     
     # 技术分析显示选项
-    show_detailed_indicators = st.checkbox("显示详细技术指标", value=False)
+    show_detailed_indicators = st.checkbox("显示详细技术指标", value=True)
     show_historical_data = st.checkbox("显示历史数据", value=False)
     
     # 其他选项
