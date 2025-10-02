@@ -47,3 +47,5 @@ Thumbs.db
 # Txt files
 *.txt
 trading_data.db
+python_installer.pkg
+venv_python312/*
