@@ -574,7 +574,7 @@ def create_price_chart(prices_df, ticker, analysis):
             '随机指标(KDJ)',
             '威廉指标'
         ),
-        row_heights=[0.25, 0.15, 0.1, 0.1, 0.1, 0.15, 0.15]
+        row_heights=[0.15, 0.25, 0.1, 0.1, 0.1, 0.15, 0.15]
     )
     
     # 主图：价格和布林带（只在有数据时添加）

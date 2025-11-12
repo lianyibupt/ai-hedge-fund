@@ -112,22 +112,87 @@ def calculate_volume_analysis(prices_df: pd.DataFrame, ma_period: int = 5) -> Di
     Returns:
         包含成交量分析结果的字典
     """
+    # 检查数据有效性
+    if prices_df.empty or 'volume' not in prices_df.columns:
+        return {
+            'volume_ma': pd.Series(),
+            'volume_ratio': pd.Series(),
+            'latest_ratio': 1.0,
+            'is_volume_surge': False,
+            'current_volume': 0,
+            'avg_volume': 0,
+            'reason': '成交量数据缺失或异常，暂时无法判断'
+        }
+    
     volume = prices_df['volume']
     
-    # 计算成交量移动平均
-    volume_ma = volume.rolling(window=ma_period).mean()
+    # 获取当前成交量
+    current_volume = volume.iloc[-1] if len(volume) > 0 else 0
+    
+    # 如果当前成交量为0，直接返回异常标记
+    if current_volume <= 0:
+        return {
+            'volume_ma': pd.Series(),
+            'volume_ratio': pd.Series(),
+            'latest_ratio': 1.0,  # 不使用0，避免被判断为萎缩
+            'is_volume_surge': False,
+            'current_volume': 0,  # 明确标记为0
+            'avg_volume': 0,       # 平均成交量也设为0，表示数据异常
+            'reason': '当前成交量为0，数据异常'
+        }
+    
+    # 过滤掉成交量为0的异常数据点
+    valid_volume_df = prices_df[prices_df['volume'] > 0]
+    
+    # 如果没有有效数据，返回异常标记
+    if valid_volume_df.empty:
+        return {
+            'volume_ma': pd.Series(),
+            'volume_ratio': pd.Series(),
+            'latest_ratio': 1.0,
+            'is_volume_surge': False,
+            'current_volume': current_volume,
+            'avg_volume': 0,  # 平均成交量设为0，表示数据异常
+            'reason': '成交量数据缺失或异常，暂时无法判断'
+        }
+    
+    # 计算成交量移动平均（使用有效数据）
+    volume_ma = valid_volume_df['volume'].rolling(window=ma_period, min_periods=1).mean()
+    # 重新索引以匹配原始数据长度
+    volume_ma = volume_ma.reindex(prices_df.index, method='ffill')
+    
+    # 获取最新的平均成交量
+    avg_volume = volume_ma.iloc[-1] if len(volume_ma) > 0 and not pd.isna(volume_ma.iloc[-1]) else 0
+    
+    # 如果平均成交量为0，返回异常标记
+    if avg_volume <= 0:
+        return {
+            'volume_ma': volume_ma,
+            'volume_ratio': pd.Series(),
+            'latest_ratio': 1.0,
+            'is_volume_surge': False,
+            'current_volume': current_volume,
+            'avg_volume': 0,  # 明确标记为0
+            'reason': '平均成交量为0，数据异常'
+        }
     
     # 计算成交量比率
     volume_ratio = volume / volume_ma
     
     # 计算最新的成交量放大倍数
-    latest_volume_ratio = volume_ratio.iloc[-1] if len(volume_ratio) > 0 else 1.0
+    latest_volume_ratio = volume_ratio.iloc[-1] if len(volume_ratio) > 0 and not pd.isna(volume_ratio.iloc[-1]) else 1.0
+    
+    # 判断是否放量
+    is_volume_surge = latest_volume_ratio >= 1.5
     
     return {
         'volume_ma': volume_ma,
         'volume_ratio': volume_ratio,
         'latest_ratio': latest_volume_ratio,
-        'is_volume_surge': latest_volume_ratio >= 1.5  # 1.5倍以上认为是放量
+        'is_volume_surge': is_volume_surge,
+        'current_volume': current_volume,
+        'avg_volume': avg_volume,
+        'reason': '成交量数据正常'
     }
 
 
@@ -477,39 +542,77 @@ def analyze_volume_signals(volume_analysis: Dict[str, Any]) -> Dict[str, Any]:
     Returns:
         成交量信号分析结果
     """
-    latest_ratio = volume_analysis['latest_ratio']
-    is_volume_surge = volume_analysis['is_volume_surge']
-    
-    signal = '中性'
-    reason = ''
-    
-    if is_volume_surge:
-        signal = '看涨'
-        reason = f'成交量放大{latest_ratio:.1f}倍，资金进场'
-    elif latest_ratio < 0.7:
-        signal = '看跌'
-        reason = f'成交量萎缩({latest_ratio:.1f}倍)，缺乏资金支持'
-    elif latest_ratio >= 1.2:
-        signal = '看涨'
-        reason = f'成交量温和放大({latest_ratio:.1f}倍)'
-    elif latest_ratio < 0.8:
-        signal = '看跌'
-        reason = f'成交量偏低({latest_ratio:.1f}倍)'
-    
-    # 获取最新成交量数据
-    volume_ma = volume_analysis['volume_ma']
-    current_volume = volume_ma.iloc[-1] * latest_ratio if len(volume_ma) > 0 else 0
-    avg_volume = volume_ma.iloc[-1] if len(volume_ma) > 0 else 0
-    
-    return {
-        'signal': signal,
-        'reason': reason,
-        'volume_ratio': float(latest_ratio),
-        'is_surge': bool(is_volume_surge),
-        'current_volume': float(current_volume),
-        'avg_volume': float(avg_volume),
-        'volume_trend': '放量' if latest_ratio >= 1.2 else '缩量' if latest_ratio < 0.8 else '正常'
-    }
+    # 直接创建结果字典，使用get方法安全获取所有字段
+    try:
+        # 只获取我们需要的字段，不依赖volume_ma
+        latest_ratio = float(volume_analysis.get('latest_ratio', 1.0))
+        is_volume_surge = bool(volume_analysis.get('is_volume_surge', False))
+        current_volume = float(volume_analysis.get('current_volume', 0))
+        avg_volume = float(volume_analysis.get('avg_volume', 0))
+        
+        # 初始化信号和原因
+        signal = '中性'
+        reason = '成交量数据正常'
+        volume_trend = '正常'
+        
+        # 关键修复：当成交量为0或平均成交量为0时，返回中性信号
+        if current_volume <= 0 or avg_volume <= 0:
+            signal = '中性'
+            if current_volume <= 0 and avg_volume <= 0:
+                reason = '成交量数据缺失或异常，暂时无法判断'
+            elif current_volume <= 0:
+                reason = '当前成交量为0，数据异常'
+            else:
+                reason = '平均成交量为0，数据异常'
+            volume_trend = '异常'
+        else:
+            # 只有当数据有效时才进行信号判断
+            if is_volume_surge:
+                signal = '看涨'
+                reason = f'成交量放大({latest_ratio:.1f}倍)，资金进场'
+                volume_trend = '放量'
+            elif latest_ratio < 0.7:
+                signal = '看跌'
+                reason = f'成交量萎缩({latest_ratio:.1f}倍)，缺乏资金支持'
+                volume_trend = '缩量'
+            elif latest_ratio >= 1.2:
+                signal = '看涨'
+                reason = f'成交量温和放大({latest_ratio:.1f}倍)'
+                volume_trend = '放量'
+            elif latest_ratio < 0.8:
+                signal = '看跌'
+                reason = f'成交量偏低({latest_ratio:.1f}倍)'
+                volume_trend = '缩量'
+            else:
+                signal = '中性'
+                reason = '成交量数据正常，无明显异常'
+                volume_trend = '正常'
+        
+        # 直接返回结果，确保所有字段都被正确设置
+        result = {
+            'signal': signal,
+            'reason': reason,  # 确保reason字段始终有值
+            'volume_ratio': latest_ratio,
+            'is_surge': is_volume_surge,
+            'current_volume': current_volume,
+            'avg_volume': avg_volume,
+            'volume_trend': volume_trend
+        }
+        
+        return result
+    except Exception as e:
+        # 如果发生任何异常，返回有效的默认结果
+        error_reason = f'处理成交量信号时出错: {str(e)}'
+        print(f"[DEBUG] {error_reason}")  # 添加调试输出
+        return {
+            'signal': '中性',
+            'reason': error_reason,
+            'volume_ratio': 1.0,
+            'is_surge': False,
+            'current_volume': 0.0,
+            'avg_volume': 0.0,
+            'volume_trend': '正常'
+        }
 
 
 def analyze_roc_signals(roc: pd.Series) -> Dict[str, Any]:
@@ -731,49 +834,7 @@ def analyze_williams_r_signals(williams_r: pd.Series) -> Dict[str, Any]:
     }
 
 
-def analyze_volume_signals(volume_analysis: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    分析成交量交易信号
-    
-    Args:
-        volume_analysis: 成交量分析结果
-    
-    Returns:
-        成交量信号分析结果
-    """
-    latest_ratio = volume_analysis['latest_ratio']
-    is_volume_surge = volume_analysis['is_volume_surge']
-    
-    signal = '中性'
-    reason = ''
-    
-    if is_volume_surge:
-        signal = '看涨'
-        reason = f'成交量放大{latest_ratio:.1f}倍，资金进场'
-    elif latest_ratio < 0.7:
-        signal = '看跌'
-        reason = f'成交量萎缩({latest_ratio:.1f}倍)，缺乏资金支持'
-    elif latest_ratio >= 1.2:
-        signal = '看涨'
-        reason = f'成交量温和放大({latest_ratio:.1f}倍)'
-    elif latest_ratio < 0.8:
-        signal = '看跌'
-        reason = f'成交量偏低({latest_ratio:.1f}倍)'
-    
-    # 获取最新成交量数据
-    volume_ma = volume_analysis['volume_ma']
-    current_volume = volume_ma.iloc[-1] * latest_ratio if len(volume_ma) > 0 else 0
-    avg_volume = volume_ma.iloc[-1] if len(volume_ma) > 0 else 0
-    
-    return {
-        'signal': signal,
-        'reason': reason,
-        'volume_ratio': float(latest_ratio),
-        'is_surge': bool(is_volume_surge),
-        'current_volume': float(current_volume),
-        'avg_volume': float(avg_volume),
-        'volume_trend': '放量' if latest_ratio >= 1.2 else '缩量' if latest_ratio < 0.8 else '正常'
-    }
+
 
 
 def generate_comprehensive_signal(prices_df: pd.DataFrame) -> Dict[str, Any]:
